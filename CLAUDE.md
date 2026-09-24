@@ -5,6 +5,9 @@
 - **Never make assumptions.** If a requirement, game mechanic, data format, or design choice is not written down in this file or in `docs/`, ask the developer instead of guessing.
 - The developer can provide more information or links about Uma Musume on request; ask for them rather than filling gaps from general knowledge.
 - Treat game-mechanic claims as unconfirmed unless `docs/team-trials-reference.md` tags them `[Developer]` or `[Screenshot]`.
+- **Always use best practices.** Pretend you are a senior software engineer, and review your own code as if you were a senior doing a code review for a junior.
+- **Never over-engineer.** Always take the simplest best-practice path that fits the problem best.
+- **Write unit tests for new or changed logic.** Any new or modified function/module in `src/db/` or `src/ocr/` needs accompanying Vitest tests in the same change, co-located next to the file it tests (e.g. `matches.js` → `matches.test.js`), following the existing style (plain `describe`/`it`/`expect` imports, no test globals). React component tests (`src/components/`) are deferred until the UI stabilizes — see `docs/decisions.md`.
 
 ## Project Overview
 
@@ -60,15 +63,21 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
 │   ├── team-trials-reference.md     # How Team Trials works (reference for design decisions)
 │   ├── roadmap.md                   # MVP scope, later phases, uncommitted ideas
 │   └── decisions.md                 # Log of decisions made and decisions still pending
-├── vitest.config.js                 # Vitest config (node environment, src/**/*.test.js)
+├── .github/
+│   └── workflows/
+│       └── test.yml                 # CI: lint + test on push/PR to main
+├── vitest.config.js                 # Vitest config (node environment, src/**/*.test.js, fake-indexeddb setup, coverage-v8 report-only)
 └── src/                             # React + Vite app
     ├── db/
     │   ├── db.js                    # Dexie instance + schema
     │   ├── constants.js             # Distance category enum
-    │   └── matches.js               # Data-access layer: add/query/delete matches and umas
+    │   ├── matches.js               # Data-access layer: add/query/delete matches and umas
+    │   └── matches.test.js          # Unit tests against fake-indexeddb: addMatch/getLatestMatchEntries/getRosterSummary/deleteUmaHistory
     ├── ocr/
     │   ├── imageValidation.js       # Light upload validation (file type, size cap)
+    │   ├── imageValidation.test.js  # Unit tests for the type/size validation rules
     │   ├── tesseractClient.js       # Tesseract.js worker wrapper (lazy-loaded, singleton worker)
+    │   ├── tesseractClient.test.js  # Unit tests for the wrapper logic (singleton reuse, flattening, terminate) against a mocked tesseract.js
     │   ├── tesseractClient.smoke.test.js  # Skipped-by-default real-OCR test against the fixtures
     │   ├── parseScoreInfo.js        # Bbox-based row parsing (parseScreenshotRows) + two-screenshot de-dup (mergeScreenshotRows)
     │   ├── parseScoreInfo.test.js   # Parsing/merge unit tests (synthetic bbox fixtures, no Tesseract needed)
@@ -81,7 +90,7 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
     └── main.jsx
 ```
 
-Test script: `npm test` (Vitest). Real Score Info screenshots for OCR testing live in `docs/Score_Info_1.jpg` / `Score_Info_2.jpg` (source of truth) and are copied into `src/ocr/__fixtures__/`.
+Test script: `npm test` (Vitest), `npm run test:coverage` for a report-only coverage run (no enforced threshold). Real Score Info screenshots for OCR testing live in `docs/Score_Info_1.jpg` / `Score_Info_2.jpg` (source of truth) and are copied into `src/ocr/__fixtures__/`. React component tests (for `components/`) are not yet set up — deferred pending UI stabilization.
 
 Update this section whenever files or folders are added.
 

@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+coverage
 
 # Tesseract.js Node-side language data cache (downloaded on first OCR run,
 # e.g. via the smoke test in src/ocr/)
