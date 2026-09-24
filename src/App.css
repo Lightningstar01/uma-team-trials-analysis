@@ -55,6 +55,21 @@ input[type='number'] {
   color: #c0392b;
 }
 
+.ocr-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+
+.ocr-warnings {
+  margin: 0;
+  padding-left: 20px;
+  color: #b8860b;
+}
+
 #match-entry-form button[type='submit'] {
   align-self: flex-start;
   padding: 8px 20px;
