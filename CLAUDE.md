@@ -70,7 +70,9 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
     │   ├── imageValidation.js       # Light upload validation (file type, size cap)
     │   ├── tesseractClient.js       # Tesseract.js worker wrapper (lazy-loaded, singleton worker)
     │   ├── tesseractClient.smoke.test.js  # Skipped-by-default real-OCR test against the fixtures
-    │   └── __fixtures__/            # Copies of docs/Score_Info_*.jpg for OCR dev/testing
+    │   ├── parseScoreInfo.js        # Bbox-based row parsing (parseScreenshotRows) + two-screenshot de-dup (mergeScreenshotRows)
+    │   ├── parseScoreInfo.test.js   # Parsing/merge unit tests (synthetic bbox fixtures, no Tesseract needed)
+    │   └── __fixtures__/            # Copies of docs/Score_Info_*.jpg for OCR dev/testing, plus sampleMatch.js (15-row reference data)
     ├── components/
     │   ├── RosterDashboard.jsx      # Per-uma averages, weakest-link recommendation, delete-uma
     │   ├── MatchEntryForm.jsx       # Manual 15-row match entry (screenshot input/OCR: Phase 1, in progress)
