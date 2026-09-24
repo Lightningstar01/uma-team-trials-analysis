@@ -1,6 +1,6 @@
 // The 15-row sample match from docs/team-trials-reference.md's Score Info
 // table, factored out for reuse in OCR parsing tests. Ranked by points,
-// highest first, matching the real Score_Info_1.jpg / Score_Info_2.jpg
+// highest first, matching the real Score_Info_1a.jpg / Score_Info_1b.jpg
 // fixtures.
 export const sampleMatch = [
   { umaName: 'Super Creek', distance: 'Long', points: 80936 },

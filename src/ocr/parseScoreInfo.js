@@ -1,4 +1,5 @@
 import { DISTANCE_ORDER } from '../db/constants.js'
+import { lookupUmaName } from './umaNames.js'
 
 // Matches "80,936 pts" / "999pts" / "PTS" etc. Group 1 is the digits+commas.
 const POINTS_REGEX = /(\d{1,3}(?:,\d{3})*)\s*pts?\b/i
@@ -55,6 +56,32 @@ function extractUmaName(words) {
     .trim()
 }
 
+// Greedily pairs each item in `as` with its nearest unclaimed item in `bs`
+// (by `.yc`), skipping any pair whose gap exceeds maxGap. Shared by
+// name<->distance pairing and by the split-row rescue below, which both
+// need "nearest unclaimed match within a vertical tolerance."
+function nearestPairs(as, bs, maxGap) {
+  const candidates = []
+  for (const a of as) {
+    for (const b of bs) {
+      candidates.push({ a, b, gap: Math.abs(a.yc - b.yc) })
+    }
+  }
+  candidates.sort((x, y) => x.gap - y.gap)
+
+  const usedA = new Set()
+  const usedB = new Set()
+  const pairs = []
+  for (const { a, b, gap } of candidates) {
+    if (gap > maxGap) break // sorted ascending - no valid pairs remain
+    if (usedA.has(a) || usedB.has(b)) continue
+    usedA.add(a)
+    usedB.add(b)
+    pairs.push({ a, b })
+  }
+  return pairs
+}
+
 // Bbox-based extraction rather than a sequential line-walk: the Score Info
 // screen is two-column (portrait+distance on the left, name/points on the
 // right), so Tesseract's reading order doesn't reliably interleave rows.
@@ -66,49 +93,62 @@ function extractUmaName(words) {
 // nearby distance line (the real cut-off case at a screenshot's bottom
 // edge) still becomes a row, with distance left null for
 // mergeScreenshotRows to fill in.
+//
+// Tesseract sometimes splits one visual row's name and points across two
+// separate OCR lines instead (seen on a real fixture - see
+// docs/decisions.md), which used to drop the row entirely: the points-only
+// line has no name-column words, and the name-only line's leftover text
+// doesn't match POINTS_REGEX. Those orphaned halves are now paired by
+// proximity too, same as name<->distance, but only when the name-only
+// line's text is an exact match against the known uma roster
+// (lookupUmaName) - that's what tells a real stray name apart from
+// unrelated noise (badge text, epithet banners) that can also land in the
+// name column's x-range.
 export function parseScreenshotRows(lines) {
   const nameCandidates = []
   const distanceCandidates = []
+  const orphanPoints = []
+  const orphanNames = []
 
   for (const line of lines) {
     const text = line.text.trim()
+    const words = line.words ?? []
+    const yc = lineCenter(line.bbox)
 
     // Points takes priority: a name+points line is the more specific/positive
     // signal, so it's checked before falling back to distance-word matching.
     const pointsMatch = text.match(POINTS_REGEX)
     if (pointsMatch) {
-      const umaName = extractUmaName(line.words ?? [])
-      if (!umaName) continue // no identifiable name - can't key this row on anything
-      nameCandidates.push({
-        umaName,
-        points: Number(pointsMatch[1].replace(/,/g, '')),
-        yc: lineCenter(line.bbox),
-      })
+      const umaName = extractUmaName(words)
+      const points = Number(pointsMatch[1].replace(/,/g, ''))
+      if (umaName) {
+        nameCandidates.push({ umaName, points, yc })
+      } else {
+        orphanPoints.push({ points, yc })
+      }
       continue
     }
 
     const distanceMatch = findDistanceInLine(text)
     if (distanceMatch) {
-      distanceCandidates.push({ distance: distanceMatch, yc: lineCenter(line.bbox) })
+      distanceCandidates.push({ distance: distanceMatch, yc })
+      continue
     }
+
+    const knownName = lookupUmaName(extractUmaName(words) ?? '')
+    if (knownName) {
+      orphanNames.push({ umaName: knownName, yc })
+    }
+  }
+
+  for (const { a, b } of nearestPairs(orphanNames, orphanPoints, MAX_ROW_PAIR_GAP)) {
+    nameCandidates.push({ umaName: a.umaName, points: b.points, yc: (a.yc + b.yc) / 2 })
   }
 
   nameCandidates.sort((a, b) => a.yc - b.yc)
 
-  const pairs = []
-  for (const n of nameCandidates) {
-    for (const d of distanceCandidates) {
-      pairs.push({ n, d, gap: Math.abs(n.yc - d.yc) })
-    }
-  }
-  pairs.sort((a, b) => a.gap - b.gap)
-
-  const usedDistances = new Set()
   const distanceByName = new Map()
-  for (const { n, d, gap } of pairs) {
-    if (gap > MAX_ROW_PAIR_GAP) break // sorted ascending - no valid pairs remain
-    if (distanceByName.has(n) || usedDistances.has(d)) continue
-    usedDistances.add(d)
+  for (const { a: n, b: d } of nearestPairs(nameCandidates, distanceCandidates, MAX_ROW_PAIR_GAP)) {
     distanceByName.set(n, d.distance)
   }
 
@@ -117,6 +157,41 @@ export function parseScreenshotRows(lines) {
     distance: distanceByName.get(n) ?? null,
     points: n.points,
   }))
+}
+
+// Detects a screenshot's leading fragment: a distance-word line positioned
+// above every name+points line in the same screenshot. This is what's left
+// of the previous screenshot's last row when its distance pill renders past
+// the bottom edge there but the row itself scrolls just far enough into this
+// screenshot to show the pill at the very top. At most one such fragment is
+// expected per screenshot. OCR only catches it sometimes (see
+// docs/decisions.md - real fixtures show it legible in some pairs and
+// unrecognizable noise in others), so this is an opportunistic signal for
+// mergeScreenshotRows to resolve the split row directly; the elimination
+// fallback in inferMissingDistances still covers the rest.
+export function findLeadingDistance(lines) {
+  let firstNameY = Infinity
+  const distanceLines = []
+
+  for (const line of lines) {
+    const text = line.text.trim()
+
+    if (POINTS_REGEX.test(text)) {
+      firstNameY = Math.min(firstNameY, lineCenter(line.bbox))
+      continue
+    }
+
+    const distanceMatch = findDistanceInLine(text)
+    if (distanceMatch) {
+      distanceLines.push({ distance: distanceMatch, yc: lineCenter(line.bbox) })
+    }
+  }
+
+  if (firstNameY === Infinity || distanceLines.length === 0) return null
+
+  distanceLines.sort((a, b) => a.yc - b.yc)
+  const topDistance = distanceLines[0]
+  return topDistance.yc < firstNameY ? topDistance.distance : null
 }
 
 function normalizeName(name) {
@@ -157,8 +232,12 @@ function inferMissingDistances(rows, warnings) {
 // overlaps between them. Matching key is the normalized uma name - safe
 // because match entry already enforces unique names within a match, so a
 // name collision across the two screenshots' row sets can only be the
-// overlap row.
-export function mergeScreenshotRows(rowsA, rowsB) {
+// overlap row. `leadingDistanceForB` (from findLeadingDistance on
+// screenshot B's raw lines) is optional and, when present, is only applied
+// if exactly one merged row is still missing a distance - same
+// can't-tell-which-row-it-is-for guard as inferMissingDistances, since a
+// second unresolved row would make the fragment's target ambiguous.
+export function mergeScreenshotRows(rowsA, rowsB, leadingDistanceForB = null) {
   const warnings = []
   const byName = new Map()
 
@@ -190,6 +269,14 @@ export function mergeScreenshotRows(rowsA, rowsB) {
   }
 
   const rows = [...byName.values()]
+
+  if (leadingDistanceForB != null) {
+    const missing = rows.filter((row) => row.distance == null)
+    if (missing.length === 1) {
+      missing[0].distance = leadingDistanceForB
+    }
+  }
+
   inferMissingDistances(rows, warnings)
 
   return { rows, warnings }
