@@ -75,7 +75,7 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
     │   └── __fixtures__/            # Copies of docs/Score_Info_*.jpg for OCR dev/testing, plus sampleMatch.js (15-row reference data)
     ├── components/
     │   ├── RosterDashboard.jsx      # Per-uma averages, weakest-link recommendation, delete-uma
-    │   ├── MatchEntryForm.jsx       # Manual 15-row match entry (screenshot input/OCR: Phase 1, in progress)
+    │   ├── MatchEntryForm.jsx       # 15-row match entry: manual typing, or upload 1-2 Score Info screenshots to auto-fill via OCR
     │   └── OcrDebugPanel.jsx        # Dev-only (DEV build) raw-OCR-text diagnostic tool
     ├── App.jsx
     └── main.jsx

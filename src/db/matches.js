@@ -1,11 +1,11 @@
 import { db } from './db'
 
-export async function addMatch({ playedAt, rows }) {
+export async function addMatch({ playedAt, rows, source = 'manual' }) {
   return db.transaction('rw', db.matches, db.matchEntries, async () => {
     const matchId = await db.matches.add({
       playedAt,
       createdAt: Date.now(),
-      source: 'manual',
+      source,
     })
 
     await db.matchEntries.bulkAdd(

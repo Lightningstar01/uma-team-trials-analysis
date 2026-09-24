@@ -4,9 +4,9 @@ Feature timeline for the Uma Team Trials Score Auditor. Items tagged **[Develope
 
 ## Phase 1: MVP (Simple Mode only)
 
-- [ ] **Screenshot input [Developer]:** the user provides the two "Score Info" screenshots for a match (a scrolling list; two screenshots cover all 15 umas).
-- [ ] **OCR extraction [Blueprint: Tesseract.js, client-side]:** read each row's uma name, points, and distance from the screenshots, ignoring the epithet banners. Which fields to extract is not yet decided.
-- [ ] **De-duplicate overlapping rows** between the two screenshots (a row can appear cut off in both).
+- [x] **Screenshot input [Developer]:** the user provides the two "Score Info" screenshots for a match (a scrolling list; two screenshots cover all 15 umas).
+- [x] **OCR extraction [Blueprint: Tesseract.js, client-side]:** read each row's uma name, points, and distance from the screenshots, ignoring the epithet banners.
+- [x] **De-duplicate overlapping rows** between the two screenshots (a row can appear cut off in both).
 - [x] **Log each match** to browser storage (IndexedDB) [Blueprint].
 - [x] **Simple Mode [Developer]:** the MVP has no Ace adjustment or any other score adjustment — all 15 umas' raw Gained Scores are compared equally by their averages. Advanced Mode is Phase 2.
 - [x] **Rolling average per uma [Developer]:** over all history.
