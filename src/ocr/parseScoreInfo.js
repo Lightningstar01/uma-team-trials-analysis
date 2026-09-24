@@ -1,5 +1,5 @@
 import { DISTANCE_ORDER } from '../db/constants.js'
-import { lookupUmaName } from './umaNames.js'
+import { lookupUmaName, resolveUmaName } from './umaNames.js'
 
 // Matches "80,936 pts" / "999pts" / "PTS" etc. Group 1 is the digits+commas.
 const POINTS_REGEX = /(\d{1,3}(?:,\d{3})*)\s*pts?\b/i
@@ -18,11 +18,31 @@ const NAME_COLUMN_X_RANGE = { min: 250, max: 700 }
 // screenshot resolution changes.
 const MAX_ROW_PAIR_GAP = 200
 
+// A bare 1-3 digit token with no comma, sitting where the points column
+// starts (see NAME_COLUMN_X_RANGE's comment - same x0≈752 boundary) but on a
+// line with no "pts" suffix, is the thousands-group prefix of a
+// comma-formatted score that Tesseract split onto its row's *other* output
+// line - not a separate misread. Real fixture: Oguri Cap's row on
+// `Score_Info_3b.jpg` came back as "WHY ogu 42" (name fragment + this
+// prefix) and "I guri Cap 711 pts" on the very next line - the true score is
+// 42,711 (see docs/decisions.md). The gap between those two lines' centers
+// was ~12px, far tighter than a normal same-row gap (~65-135px) or the
+// smallest known cross-row gap (~270px), so a small dedicated threshold
+// keeps this from ever pairing across two different rows.
+const POINTS_PREFIX_X_MIN = NAME_COLUMN_X_RANGE.max
+const POINTS_PREFIX_REGEX = /^\d{1,3}$/
+const MAX_POINTS_SPLIT_GAP = 40
+
 // Fixed roster shape (see CLAUDE.md / team-trials-reference.md): 15 umas,
 // exactly 3 per distance category. Used to infer a row's distance by
 // elimination when neither screenshot captured it directly for that row.
 const ROSTER_SIZE = 15
 const EXPECTED_PER_DISTANCE = ROSTER_SIZE / DISTANCE_ORDER.length
+
+// Below this, a score is more likely a misread (e.g. a leading digit group
+// dropped, as seen on a real fixture - see docs/decisions.md) than a real
+// Team Trials result.
+const MIN_PLAUSIBLE_POINTS = 10000
 
 const DISTANCE_LOOKUP = new Map(DISTANCE_ORDER.map((d) => [d.toLowerCase(), d]))
 
@@ -109,6 +129,7 @@ export function parseScreenshotRows(lines) {
   const distanceCandidates = []
   const orphanPoints = []
   const orphanNames = []
+  const pointsPrefixCandidates = []
 
   for (const line of lines) {
     const text = line.text.trim()
@@ -119,10 +140,14 @@ export function parseScreenshotRows(lines) {
     // signal, so it's checked before falling back to distance-word matching.
     const pointsMatch = text.match(POINTS_REGEX)
     if (pointsMatch) {
-      const umaName = extractUmaName(words)
+      const rawName = extractUmaName(words)
       const points = Number(pointsMatch[1].replace(/,/g, ''))
-      if (umaName) {
-        nameCandidates.push({ umaName, points, yc })
+      if (rawName) {
+        // This line already anchors a confirmed row (it has a points match),
+        // so an inexact name is corrected to the closest dictionary entry
+        // rather than kept as raw OCR text - see umaNames.js.
+        const { name: umaName, exact } = resolveUmaName(rawName)
+        nameCandidates.push({ umaName, points, yc, rawName: exact ? undefined : rawName })
       } else {
         orphanPoints.push({ points, yc })
       }
@@ -135,6 +160,13 @@ export function parseScreenshotRows(lines) {
       continue
     }
 
+    const prefixWord = words.find(
+      (w) => w.bbox.x0 >= POINTS_PREFIX_X_MIN && POINTS_PREFIX_REGEX.test(w.text)
+    )
+    if (prefixWord) {
+      pointsPrefixCandidates.push({ digits: prefixWord.text, yc })
+    }
+
     const knownName = lookupUmaName(extractUmaName(words) ?? '')
     if (knownName) {
       orphanNames.push({ umaName: knownName, yc })
@@ -143,6 +175,15 @@ export function parseScreenshotRows(lines) {
 
   for (const { a, b } of nearestPairs(orphanNames, orphanPoints, MAX_ROW_PAIR_GAP)) {
     nameCandidates.push({ umaName: a.umaName, points: b.points, yc: (a.yc + b.yc) / 2 })
+  }
+
+  // Only a candidate whose points are still a bare last-group-sized number
+  // (<1000) is eligible - a comma group after the first is always exactly 3
+  // digits, so a bigger value already isn't missing a prefix.
+  const prefixEligible = nameCandidates.filter((n) => n.points < 1000)
+  for (const { a: prefix, b: candidate } of nearestPairs(pointsPrefixCandidates, prefixEligible, MAX_POINTS_SPLIT_GAP)) {
+    candidate.pointsCorrectedFrom = candidate.points
+    candidate.points = Number(`${prefix.digits}${String(candidate.points).padStart(3, '0')}`)
   }
 
   nameCandidates.sort((a, b) => a.yc - b.yc)
@@ -156,6 +197,8 @@ export function parseScreenshotRows(lines) {
     umaName: n.umaName,
     distance: distanceByName.get(n) ?? null,
     points: n.points,
+    ...(n.rawName ? { correctedFrom: n.rawName } : {}),
+    ...(n.pointsCorrectedFrom != null ? { pointsCorrectedFrom: n.pointsCorrectedFrom } : {}),
   }))
 }
 
@@ -228,6 +271,30 @@ function inferMissingDistances(rows, warnings) {
   }
 }
 
+// Warns about any row whose name wasn't an exact dictionary match and was
+// corrected to the closest one instead (see resolveUmaName in umaNames.js) -
+// a guess, even a good one, is still worth a second look.
+export function collectNameCorrectionWarnings(rows) {
+  return rows
+    .filter((row) => row.correctedFrom)
+    .map(
+      (row) =>
+        `${row.umaName}: OCR read "${row.correctedFrom}" — corrected to the closest known uma, please verify.`
+    )
+}
+
+// Warns about any row whose score was reassembled from a thousands-group
+// prefix Tesseract split onto a separate line (see POINTS_PREFIX_X_MIN's
+// comment) - a reconstructed number is still worth a second look.
+export function collectPointsCorrectionWarnings(rows) {
+  return rows
+    .filter((row) => row.pointsCorrectedFrom != null)
+    .map(
+      (row) =>
+        `${row.umaName}: OCR split the score across two lines — corrected from ${row.pointsCorrectedFrom} to ${row.points.toLocaleString('en-US')} pts, please verify.`
+    )
+}
+
 // Merges the two screenshots' rows, de-duplicating the one row that
 // overlaps between them. Matching key is the normalized uma name - safe
 // because match entry already enforces unique names within a match, so a
@@ -270,6 +337,8 @@ export function mergeScreenshotRows(rowsA, rowsB, leadingDistanceForB = null) {
 
   const rows = [...byName.values()]
 
+  warnings.push(...collectNameCorrectionWarnings(rows), ...collectPointsCorrectionWarnings(rows))
+
   if (leadingDistanceForB != null) {
     const missing = rows.filter((row) => row.distance == null)
     if (missing.length === 1) {
@@ -280,4 +349,49 @@ export function mergeScreenshotRows(rowsA, rowsB, leadingDistanceForB = null) {
   inferMissingDistances(rows, warnings)
 
   return { rows, warnings }
+}
+
+// Flags rows that look wrong regardless of how they were filled (manual
+// typing or OCR): a name outside the known uma dictionary, a distance
+// category with other than the fixed 3 members, or an implausibly low
+// score. Unlike parseScreenshotRows/mergeScreenshotRows' warnings (things
+// the parser itself couldn't resolve), this is meant to be re-run against
+// live grid state so it clears as the user fixes a row. It's the backstop
+// for a name or score that name/points auto-correction above didn't
+// recognize as fixable (e.g. a manual typo, or a genuine OCR misread rather
+// than a name/points reconstruction the parser already caught - see
+// docs/decisions.md).
+// `rows` items only need `umaName`, `distance`, and `points`; points may be
+// a number or a numeric string (the entry grid stores it as a string).
+export function validateRows(rows) {
+  const warnings = []
+  const filledRows = rows.filter((row) => row.umaName.trim() !== '')
+
+  for (const row of filledRows) {
+    if (!lookupUmaName(row.umaName)) {
+      warnings.push(`${row.umaName}: not a recognized uma name — please check the spelling.`)
+    }
+
+    const points = Number(row.points)
+    if (row.points !== '' && row.points != null && Number.isFinite(points) && points < MIN_PLAUSIBLE_POINTS) {
+      warnings.push(
+        `${row.umaName}: score of ${points.toLocaleString('en-US')} pts looks too low — please verify.`
+      )
+    }
+  }
+
+  if (filledRows.length > 0) {
+    const counts = new Map(DISTANCE_ORDER.map((d) => [d, 0]))
+    for (const row of filledRows) {
+      if (counts.has(row.distance)) counts.set(row.distance, counts.get(row.distance) + 1)
+    }
+    for (const distance of DISTANCE_ORDER) {
+      const count = counts.get(distance)
+      if (count !== EXPECTED_PER_DISTANCE) {
+        warnings.push(`${distance}: ${count} umas selected, expected ${EXPECTED_PER_DISTANCE}.`)
+      }
+    }
+  }
+
+  return warnings
 }

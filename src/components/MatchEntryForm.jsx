@@ -3,7 +3,14 @@ import { DISTANCE_ORDER } from '../db/constants'
 import { addMatch, getLatestMatchEntries } from '../db/matches'
 import { validateScreenshotFile } from '../ocr/imageValidation'
 import { recognizeImage } from '../ocr/tesseractClient'
-import { parseScreenshotRows, mergeScreenshotRows, findLeadingDistance } from '../ocr/parseScoreInfo'
+import {
+  parseScreenshotRows,
+  mergeScreenshotRows,
+  findLeadingDistance,
+  collectNameCorrectionWarnings,
+  collectPointsCorrectionWarnings,
+  validateRows,
+} from '../ocr/parseScoreInfo'
 
 const ROSTER_SIZE = 15
 // Sanity cap on a single upload, not a game-mechanic limit - just a guard
@@ -87,7 +94,8 @@ async function buildDraftFromScreenshots(files) {
 
   if (recognized.length === 1) {
     const rows = parseScreenshotRows(recognized[0].lines)
-    return { rows: toOcrGridRows(rows, []), source: 'ocr', warnings: [] }
+    const warnings = [...collectNameCorrectionWarnings(rows), ...collectPointsCorrectionWarnings(rows)]
+    return { rows: toOcrGridRows(rows, warnings), source: 'ocr', warnings }
   }
 
   const [{ lines: linesA }, { lines: linesB }] = recognized
@@ -261,65 +269,68 @@ function MatchEntryForm() {
           {ocrError && <p className="form-error">{ocrError}</p>}
         </div>
 
-        {matches.map((match, matchIndex) => (
-          <fieldset key={matchIndex}>
-            {matches.length > 1 && <legend>Match {matchIndex + 1}</legend>}
+        {matches.map((match, matchIndex) => {
+          const warnings = [...match.warnings, ...validateRows(match.rows)]
+          return (
+            <fieldset key={matchIndex}>
+              {matches.length > 1 && <legend>Match {matchIndex + 1}</legend>}
 
-            {match.warnings.length > 0 && (
-              <ul className="ocr-warnings">
-                {match.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            )}
+              {warnings.length > 0 && (
+                <ul className="ocr-warnings">
+                  {warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              )}
 
-            <table>
-              <thead>
-                <tr>
-                  <th>Uma</th>
-                  <th>Distance</th>
-                  <th>Points</th>
-                </tr>
-              </thead>
-              <tbody>
-                {match.rows.map((row, rowIndex) => (
-                  <tr key={rowIndex}>
-                    <td>
-                      <input
-                        type="text"
-                        value={row.umaName}
-                        onChange={(event) => updateRow(matchIndex, rowIndex, 'umaName', event.target.value)}
-                        placeholder="Uma name"
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={row.distance}
-                        onChange={(event) => updateRow(matchIndex, rowIndex, 'distance', event.target.value)}
-                      >
-                        {DISTANCE_ORDER.map((distance) => (
-                          <option key={distance} value={distance}>
-                            {distance}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={row.points}
-                        onChange={(event) => updateRow(matchIndex, rowIndex, 'points', event.target.value)}
-                        placeholder="Points"
-                      />
-                    </td>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Uma</th>
+                    <th>Distance</th>
+                    <th>Points</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </fieldset>
-        ))}
+                </thead>
+                <tbody>
+                  {match.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      <td>
+                        <input
+                          type="text"
+                          value={row.umaName}
+                          onChange={(event) => updateRow(matchIndex, rowIndex, 'umaName', event.target.value)}
+                          placeholder="Uma name"
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={row.distance}
+                          onChange={(event) => updateRow(matchIndex, rowIndex, 'distance', event.target.value)}
+                        >
+                          {DISTANCE_ORDER.map((distance) => (
+                            <option key={distance} value={distance}>
+                              {distance}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={row.points}
+                          onChange={(event) => updateRow(matchIndex, rowIndex, 'points', event.target.value)}
+                          placeholder="Points"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </fieldset>
+          )
+        })}
 
         {error && <p className="form-error">{error}</p>}
 

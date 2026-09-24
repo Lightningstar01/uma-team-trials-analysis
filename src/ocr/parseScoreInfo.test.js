@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { parseScreenshotRows, mergeScreenshotRows, findLeadingDistance } from './parseScoreInfo.js'
+import {
+  parseScreenshotRows,
+  mergeScreenshotRows,
+  findLeadingDistance,
+  collectNameCorrectionWarnings,
+  collectPointsCorrectionWarnings,
+  validateRows,
+} from './parseScoreInfo.js'
 import { sampleMatch } from './__fixtures__/sampleMatch.js'
 
 // Builders modeled on real recognizeImage() output captured from the actual
@@ -64,6 +71,25 @@ function pointsOnlyLine(y, points) {
   return {
     text: words.map((w) => w.text).join(' ') + '\n',
     bbox: { x0: 81, y0, x1: 1009, y1 },
+    words: words.map((w) => ({ text: w.text, bbox: { x0: w.x0, y0, x1: w.x1, y1 } })),
+  }
+}
+
+// Modeled on the real word bboxes Tesseract produced for Oguri Cap's row on
+// Score_Info_3b.jpg: "WHY ogu 42" - a name fragment plus a bare
+// thousands-group prefix with no comma or "pts" suffix, one line above the
+// row's actual name+points line (see docs/decisions.md).
+function pointsPrefixLine(y, digits) {
+  const y0 = y - 24
+  const y1 = y + 24
+  const words = [
+    { text: 'WHY', x0: 105, x1: 209 },
+    { text: 'ogu', x0: 279, x1: 362 },
+    { text: digits, x0: 752, x1: 752 + digits.length * 22 },
+  ]
+  return {
+    text: words.map((w) => w.text).join(' ') + '\n',
+    bbox: { x0: 105, y0, x1: Math.max(...words.map((w) => w.x1)), y1 },
     words: words.map((w) => ({ text: w.text, bbox: { x0: w.x0, y0, x1: w.x1, y1 } })),
   }
 }
@@ -147,9 +173,9 @@ describe('parseScreenshotRows', () => {
   })
 
   it('is case-insensitive when matching distance words', () => {
-    const lines = [nameLine(500, 'Test Uma', 1000), distanceLine(570, 'sprint')]
+    const lines = [nameLine(500, 'Vodka', 1000), distanceLine(570, 'sprint')]
     const rows = parseScreenshotRows(lines)
-    expect(rows).toEqual([{ umaName: 'Test Uma', distance: 'Sprint', points: 1000 }])
+    expect(rows).toEqual([{ umaName: 'Vodka', distance: 'Sprint', points: 1000 }])
   })
 
   it.each([
@@ -161,18 +187,18 @@ describe('parseScreenshotRows', () => {
   ])('parses the points regex for %s', (suffix, expectedPoints) => {
     const words = [
       { text: '~~', x0: 80, x1: 167 },
-      { text: 'Test', x0: 279, x1: 340 },
+      { text: 'Vodka', x0: 279, x1: 340 },
       ...suffix.split(' ').map((part, i) => ({ text: part, x0: 752 + i * 100, x1: 800 + i * 100 })),
     ]
     const y0 = 480
     const y1 = 520
     const line = {
-      text: `~~ Test ${suffix}\n`,
+      text: `~~ Vodka ${suffix}\n`,
       bbox: { x0: 80, y0, x1: 1000, y1 },
       words: words.map((w) => ({ text: w.text, bbox: { x0: w.x0, y0, x1: w.x1, y1 } })),
     }
     const rows = parseScreenshotRows([line])
-    expect(rows).toEqual([{ umaName: 'Test', distance: null, points: expectedPoints }])
+    expect(rows).toEqual([{ umaName: 'Vodka', distance: null, points: expectedPoints }])
   })
 
   it('drops a name+points line whose words never fall in the name column', () => {
@@ -212,6 +238,74 @@ describe('parseScreenshotRows', () => {
     const lines = [pointsOnlyLine(949, 50458), nameOnlyLine(977, 'El Condor Pasa'), distanceLine(1028, 'Dirt')]
     const rows = parseScreenshotRows(lines)
     expect(rows).toEqual([{ umaName: 'El Condor Pasa', distance: 'Dirt', points: 50458 }])
+  })
+
+  it('corrects a garbled name+points line to the closest known uma, recording the raw OCR text', () => {
+    // Mirrors the real Score_Info_3b.jpg misread (see docs/decisions.md):
+    // "Oguri Cap" read as "guri Cap", on one line with its points.
+    const rows = parseScreenshotRows([nameLine(500, 'guri Cap', 42711)])
+    expect(rows).toEqual([
+      { umaName: 'Oguri Cap', distance: null, points: 42711, correctedFrom: 'guri Cap' },
+    ])
+  })
+
+  it('does not attach correctedFrom when the name+points line is an exact match', () => {
+    const rows = parseScreenshotRows([nameLine(500, 'Oguri Cap', 42711)])
+    expect(rows).toEqual([{ umaName: 'Oguri Cap', distance: null, points: 42711 }])
+  })
+
+  it('reassembles a score Tesseract split into a thousands-group prefix and a remainder line', () => {
+    // Mirrors the real Score_Info_3b.jpg misread (see docs/decisions.md):
+    // "WHY ogu 42" then "I guri Cap 711 pts" on the very next line - the
+    // true score is 42,711.
+    const lines = [pointsPrefixLine(500, '42'), nameLine(512, 'guri Cap', 711)]
+    const rows = parseScreenshotRows(lines)
+    expect(rows).toEqual([
+      { umaName: 'Oguri Cap', distance: null, points: 42711, correctedFrom: 'guri Cap', pointsCorrectedFrom: 711 },
+    ])
+  })
+
+  it('does not touch a normal low score when there is no nearby prefix fragment', () => {
+    const rows = parseScreenshotRows([nameLine(500, 'Oguri Cap', 500)])
+    expect(rows).toEqual([{ umaName: 'Oguri Cap', distance: null, points: 500 }])
+  })
+
+  it('does not pair a prefix fragment that is too far away to be the same row', () => {
+    const lines = [pointsPrefixLine(200, '42'), nameLine(900, 'Oguri Cap', 711)]
+    const rows = parseScreenshotRows(lines)
+    expect(rows).toEqual([{ umaName: 'Oguri Cap', distance: null, points: 711 }])
+  })
+
+  it('does not apply a prefix fragment to a row whose points are already 1000 or more', () => {
+    const lines = [pointsPrefixLine(500, '42'), nameLine(512, 'Oguri Cap', 5000)]
+    const rows = parseScreenshotRows(lines)
+    expect(rows).toEqual([{ umaName: 'Oguri Cap', distance: null, points: 5000 }])
+  })
+})
+
+describe('collectPointsCorrectionWarnings', () => {
+  it('warns about a row whose score was reassembled from a split prefix', () => {
+    const rows = [{ umaName: 'Oguri Cap', distance: 'Dirt', points: 42711, pointsCorrectedFrom: 711 }]
+    expect(collectPointsCorrectionWarnings(rows)).toEqual([
+      'Oguri Cap: OCR split the score across two lines — corrected from 711 to 42,711 pts, please verify.',
+    ])
+  })
+
+  it('returns no warnings when no row was corrected', () => {
+    expect(collectPointsCorrectionWarnings(sampleMatch)).toEqual([])
+  })
+})
+
+describe('collectNameCorrectionWarnings', () => {
+  it('warns about a row whose name was corrected from raw OCR text', () => {
+    const rows = [{ umaName: 'Oguri Cap', distance: 'Dirt', points: 42711, correctedFrom: 'guri Cap' }]
+    expect(collectNameCorrectionWarnings(rows)).toEqual([
+      'Oguri Cap: OCR read "guri Cap" — corrected to the closest known uma, please verify.',
+    ])
+  })
+
+  it('returns no warnings when no row was corrected', () => {
+    expect(collectNameCorrectionWarnings(sampleMatch)).toEqual([])
   })
 })
 
@@ -323,5 +417,80 @@ describe('mergeScreenshotRows', () => {
       'Silence Suzuka: distance could not be determined — please select it manually.',
       'Air Groove: distance could not be determined — please select it manually.',
     ])
+  })
+
+  it('surfaces a name-correction warning for a row carried over from either screenshot', () => {
+    const rowsA = sampleMatch.map((row) => ({ ...row }))
+    rowsA[0] = { ...rowsA[0], umaName: 'Oguri Cap', correctedFrom: 'guri Cap' } // stand-in corrected row
+    const { rows, warnings } = mergeScreenshotRows(rowsA, [])
+
+    expect(rows.find((r) => r.umaName === 'Oguri Cap').correctedFrom).toBe('guri Cap')
+    expect(warnings).toContain(
+      'Oguri Cap: OCR read "guri Cap" — corrected to the closest known uma, please verify.'
+    )
+  })
+
+  it('surfaces a points-correction warning for a row carried over from either screenshot', () => {
+    const rowsA = sampleMatch.map((row) => ({ ...row }))
+    rowsA[0] = { ...rowsA[0], points: 42711, pointsCorrectedFrom: 711 } // stand-in corrected row
+    const { rows, warnings } = mergeScreenshotRows(rowsA, [])
+
+    expect(rows.find((r) => r.umaName === rowsA[0].umaName).pointsCorrectedFrom).toBe(711)
+    expect(warnings).toContain(
+      `${rowsA[0].umaName}: OCR split the score across two lines — corrected from 711 to 42,711 pts, please verify.`
+    )
+  })
+})
+
+describe('validateRows', () => {
+  const blankRow = { umaName: '', distance: 'Sprint', points: '' }
+
+  it('returns no warnings for a full, correctly-filled roster', () => {
+    expect(validateRows(sampleMatch)).toEqual([])
+  })
+
+  it('returns no warnings for an entirely blank grid', () => {
+    expect(validateRows(Array.from({ length: 15 }, () => ({ ...blankRow })))).toEqual([])
+  })
+
+  it('ignores blank rows when checking distance counts', () => {
+    // sampleMatch[0] (Super Creek) is Long; the 14 blank rows default their
+    // <select> to Sprint, but being unnamed they must not count as 14 Sprints.
+    const rows = [sampleMatch[0], ...Array.from({ length: 14 }, () => ({ ...blankRow }))]
+    const warnings = validateRows(rows)
+    expect(warnings).not.toContain('Sprint: 14 umas selected, expected 3.')
+    expect(warnings).toContain('Sprint: 0 umas selected, expected 3.')
+    expect(warnings).toContain('Long: 1 umas selected, expected 3.')
+  })
+
+  it('warns when a filled name is not in the known uma dictionary', () => {
+    // Mirrors the real "Oguri Cap" -> "guri Cap" misread (see docs/decisions.md).
+    const rows = [{ umaName: 'guri Cap', distance: 'Dirt', points: 42711 }]
+    expect(validateRows(rows)).toContain(
+      'guri Cap: not a recognized uma name — please check the spelling.'
+    )
+  })
+
+  it('warns when a filled row has a score under 10,000, including string input', () => {
+    const rows = [{ umaName: 'Oguri Cap', distance: 'Dirt', points: '711' }]
+    expect(validateRows(rows)).toContain('Oguri Cap: score of 711 pts looks too low — please verify.')
+  })
+
+  it('does not warn on a valid score at or above the 10,000 floor', () => {
+    const rows = [{ umaName: 'Oguri Cap', distance: 'Dirt', points: 10000 }]
+    expect(validateRows(rows).some((w) => w.includes('looks too low'))).toBe(false)
+  })
+
+  it('does not warn on an empty points field (still being filled in)', () => {
+    const rows = [{ umaName: 'Oguri Cap', distance: 'Dirt', points: '' }]
+    expect(validateRows(rows).some((w) => w.includes('looks too low'))).toBe(false)
+  })
+
+  it('warns when a distance category has more or fewer than 3 filled rows', () => {
+    const rows = sampleMatch.map((row) => ({ ...row }))
+    rows[0] = { ...rows[0], distance: 'Sprint' } // Super Creek moved from Long to Sprint
+    const warnings = validateRows(rows)
+    expect(warnings).toContain('Sprint: 4 umas selected, expected 3.')
+    expect(warnings).toContain('Long: 2 umas selected, expected 3.')
   })
 })

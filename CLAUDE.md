@@ -79,8 +79,10 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
     │   ├── tesseractClient.js       # Tesseract.js worker wrapper (lazy-loaded, singleton worker)
     │   ├── tesseractClient.test.js  # Unit tests for the wrapper logic (singleton reuse, flattening, terminate) against a mocked tesseract.js
     │   ├── tesseractClient.smoke.test.js  # Skipped-by-default real-OCR test against the fixtures
-    │   ├── parseScoreInfo.js        # Bbox-based row parsing (parseScreenshotRows) + two-screenshot de-dup (mergeScreenshotRows)
-    │   ├── parseScoreInfo.test.js   # Parsing/merge unit tests (synthetic bbox fixtures, no Tesseract needed)
+    │   ├── parseScoreInfo.js        # Bbox-based row parsing (parseScreenshotRows) + two-screenshot de-dup (mergeScreenshotRows) + live row-correctness warnings (validateRows)
+    │   ├── parseScoreInfo.test.js   # Parsing/merge/validation unit tests (synthetic bbox fixtures, no Tesseract needed)
+    │   ├── umaNames.js              # Known playable uma names (developer-supplied); exact lookup (lookupUmaName) for the split-row noise gate, closest-match correction (resolveUmaName/closestUmaName) for a confirmed row's name
+    │   ├── umaNames.test.js         # Unit tests for exact lookup and closest-match correction
     │   └── __fixtures__/            # Real Score Info screenshots for OCR dev/testing, plus sampleMatch.js (15-row reference data)
     ├── components/
     │   ├── RosterDashboard.jsx      # Per-uma averages, weakest-link recommendation, delete-uma
