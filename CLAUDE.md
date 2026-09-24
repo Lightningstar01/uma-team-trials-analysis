@@ -60,17 +60,26 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
 │   ├── team-trials-reference.md     # How Team Trials works (reference for design decisions)
 │   ├── roadmap.md                   # MVP scope, later phases, uncommitted ideas
 │   └── decisions.md                 # Log of decisions made and decisions still pending
+├── vitest.config.js                 # Vitest config (node environment, src/**/*.test.js)
 └── src/                             # React + Vite app
     ├── db/
     │   ├── db.js                    # Dexie instance + schema
     │   ├── constants.js             # Distance category enum
     │   └── matches.js               # Data-access layer: add/query/delete matches and umas
+    ├── ocr/
+    │   ├── imageValidation.js       # Light upload validation (file type, size cap)
+    │   ├── tesseractClient.js       # Tesseract.js worker wrapper (lazy-loaded, singleton worker)
+    │   ├── tesseractClient.smoke.test.js  # Skipped-by-default real-OCR test against the fixtures
+    │   └── __fixtures__/            # Copies of docs/Score_Info_*.jpg for OCR dev/testing
     ├── components/
     │   ├── RosterDashboard.jsx      # Per-uma averages, weakest-link recommendation, delete-uma
-    │   └── MatchEntryForm.jsx       # Manual 15-row match entry (screenshot input/OCR: Phase 1, not yet built)
+    │   ├── MatchEntryForm.jsx       # Manual 15-row match entry (screenshot input/OCR: Phase 1, in progress)
+    │   └── OcrDebugPanel.jsx        # Dev-only (DEV build) raw-OCR-text diagnostic tool
     ├── App.jsx
     └── main.jsx
 ```
+
+Test script: `npm test` (Vitest). Real Score Info screenshots for OCR testing live in `docs/Score_Info_1.jpg` / `Score_Info_2.jpg` (source of truth) and are copied into `src/ocr/__fixtures__/`.
 
 Update this section whenever files or folders are added.
 

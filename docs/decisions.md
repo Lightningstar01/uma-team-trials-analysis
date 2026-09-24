@@ -20,6 +20,9 @@ This file holds two things only: decisions/rationale not already reflected as cu
 - The empirical curve is assumed to continue beyond the sampled Team Ratings (65,493–335,567); the site will carry a disclaimer about the lack of data. Team Bonus is excluded from all calculations (it appears only on Score Details, not Score Info), and the site will carry a disclaimer for that too.
 - Advanced Mode no longer asks for the average opponent rating, because typing it for every race is too much effort; the curve estimates it. The player enters Team Rating and Support rate once, is responsible for keeping them up to date, and each match snapshots the current values.
 - Corrected an earlier reference-doc statement that `OpponentRatingRate` is the multiplier minus 1: the Score Details rows show the rate equals the multiplier (Super Creek 1st place: `10,000 × (1 + 0.10 + 1.6843 + 0.1069 + 0.02) = 29,112`).
+- **Chunk 2 (OCR) UX:** uploading Score Info screenshots prefills the same `MatchEntryForm` 15-row grid (instead of prefilling from the previous match); the user reviews/edits inline with the exact same row UI and validation manual entry already uses. There's no separate OCR review screen and no separate fallback screen — if OCR fails or misreads a row, the grid is just left editable, which is manual entry's existing role.
+- **Chunk 2 (OCR) upload validation is light:** reject non-image files and files over 15 MB; no crop/dimension requirements. Bad OCR reads are caught by the user during row review, the same way a typo would be.
+- **Chunk 2 (OCR) extracted fields:** `umaName`, `distance`, and `points` only, per Score Info row. RANK badge, Ace status, and epithet banners are out of scope for this screen (Phase 2/Edit Team concerns) and are not extracted.
 
 ## Open Questions
 
@@ -31,10 +34,8 @@ This file holds two things only: decisions/rationale not already reflected as cu
 - How each uma's RANK badge (its Rating, needed for `T`) is captured: manual entry, or OCR/portrait matching on Score Info or Edit Team.
 - How Advanced Mode treats matches logged in the MVP, which carry no Ace flags and no Team Rating or Support rate snapshots.
 - More Top Option samples above 335,567 and between the sparse points from 65,493 to 181,639, to confirm the curve.
-- Which fields must be extracted from each Score Info row.
-- Should manual score entry exist as a fallback if OCR fails?
-- Should the app show extracted values for the user to confirm before saving?
 - Hosting platform: GitHub Pages, Vercel, or Netlify.
+- Whether to self-host Tesseract.js's worker/wasm/lang-data assets (e.g. under `public/`) instead of relying on its jsDelivr CDN default — a deferred hardening item raised while building Chunk 2, not required to ship it.
 - Database schema for match history, and the score-overview UI mockup (after docs).
 - How these docs get updated now that they live in the repo (moved from a claude.ai Project into Claude Code).
 - Now that per-uma Rating can be estimated from RANK badges via the floor table, should Phase 2 derive Team Rating from OCR'd badges instead of manual entry? (Revisits the manual-entry decision above.)

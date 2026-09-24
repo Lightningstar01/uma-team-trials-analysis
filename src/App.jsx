@@ -1,5 +1,6 @@
 import MatchEntryForm from './components/MatchEntryForm'
 import RosterDashboard from './components/RosterDashboard'
+import OcrDebugPanel from './components/OcrDebugPanel'
 import './App.css'
 
 function App() {
@@ -10,6 +11,7 @@ function App() {
       </header>
       <RosterDashboard />
       <MatchEntryForm />
+      {import.meta.env.DEV && <OcrDebugPanel />}
     </>
   )
 }
