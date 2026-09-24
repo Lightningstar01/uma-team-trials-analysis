@@ -28,7 +28,7 @@ A free, browser-based tool that uses client-side OCR to read **Uma Musume: Prett
 |---|---|---|
 | Frontend framework | React with Vite | **Decided** (developer) |
 | Game version | Global, English UI | **Decided** (developer) |
-| MVP input | "Score Info" screenshots (2 scrolling screenshots cover all 15 umas) | **Decided** (developer) |
+| MVP input | "Score Info" screenshots (2 scrolling screenshots cover all 15 umas per match); the entry form accepts a batch of screenshots for several matches at once, paired up by upload order | **Decided** (developer) |
 | MVP calculation | Compare averages across all 15 umas using raw Gained Scores, with no adjustments (**Simple Mode** only) | **Decided** (developer) |
 | Advanced Mode (Phase 2) | Ranks umas by `S = I + T` (the uma's own score plus the score its Rating adds to the team), after removing Ace, Support, and Opponent Rating effects from each match's score. The player enters Support rate and Team Rating once and keeps them current, each match snapshots them, and Aces are flagged per match; assumes the player always picks the Top Option | **Decided** (developer) — see `docs/roadmap.md` and `docs/decisions.md` |
 | Opponent rating estimate (Advanced Mode) | Empirical curve of the Top Option's opponent rating multiplier vs. the player's Team Rating, fitted from developer-collected samples (not from Team Rank floors); assumed to continue beyond the sampled ratings, with a site disclaimer | **Decided** (developer) — see `docs/team-trials-reference.md` |
@@ -81,16 +81,16 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
     │   ├── tesseractClient.smoke.test.js  # Skipped-by-default real-OCR test against the fixtures
     │   ├── parseScoreInfo.js        # Bbox-based row parsing (parseScreenshotRows) + two-screenshot de-dup (mergeScreenshotRows)
     │   ├── parseScoreInfo.test.js   # Parsing/merge unit tests (synthetic bbox fixtures, no Tesseract needed)
-    │   └── __fixtures__/            # Copies of docs/Score_Info_*.jpg for OCR dev/testing, plus sampleMatch.js (15-row reference data)
+    │   └── __fixtures__/            # Real Score Info screenshots for OCR dev/testing, plus sampleMatch.js (15-row reference data)
     ├── components/
     │   ├── RosterDashboard.jsx      # Per-uma averages, weakest-link recommendation, delete-uma
-    │   ├── MatchEntryForm.jsx       # 15-row match entry: manual typing, or upload 1-2 Score Info screenshots to auto-fill via OCR
+    │   ├── MatchEntryForm.jsx       # Match entry: manual typing, or upload Score Info screenshots (one or more matches per batch) to auto-fill via OCR
     │   └── OcrDebugPanel.jsx        # Dev-only (DEV build) raw-OCR-text diagnostic tool
     ├── App.jsx
     └── main.jsx
 ```
 
-Test script: `npm test` (Vitest), `npm run test:coverage` for a report-only coverage run (no enforced threshold). Real Score Info screenshots for OCR testing live in `docs/Score_Info_1.jpg` / `Score_Info_2.jpg` (source of truth) and are copied into `src/ocr/__fixtures__/`. React component tests (for `components/`) are not yet set up — deferred pending UI stabilization.
+Test script: `npm test` (Vitest), `npm run test:coverage` for a report-only coverage run (no enforced threshold). Real Score Info screenshots for OCR testing live only in `src/ocr/__fixtures__/`, named `Score_Info_<n><a|b>.jpg` (`<n>` = match number, `a` = top screenshot, `b` = bottom screenshot — each match needs both). React component tests (for `components/`) are not yet set up — deferred pending UI stabilization.
 
 Update this section whenever files or folders are added.
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseScreenshotRows, mergeScreenshotRows } from './parseScoreInfo.js'
+import { parseScreenshotRows, mergeScreenshotRows, findLeadingDistance } from './parseScoreInfo.js'
 import { sampleMatch } from './__fixtures__/sampleMatch.js'
 
 // Builders modeled on real recognizeImage() output captured from the actual
@@ -49,7 +49,44 @@ function noiseLine(y, text) {
   }
 }
 
-// Mirrors Score_Info_1.jpg: 7 complete rows plus a trailing row (Air Groove)
+// Modeled on the real word bboxes Tesseract produced for El Condor Pasa's
+// row on Score_Info_2b.jpg, where it split one visual row into a
+// points-only line and a separate name-only line (see docs/decisions.md).
+function pointsOnlyLine(y, points) {
+  const y0 = y - 27
+  const y1 = y + 27
+  const pointsStr = points.toLocaleString('en-US')
+  const words = [
+    { text: 'wv', x0: 81, x1: 209 },
+    { text: pointsStr, x0: 753, x1: 753 + pointsStr.length * 14 },
+    { text: 'pts', x0: 892, x1: 947 },
+  ]
+  return {
+    text: words.map((w) => w.text).join(' ') + '\n',
+    bbox: { x0: 81, y0, x1: 1009, y1 },
+    words: words.map((w) => ({ text: w.text, bbox: { x0: w.x0, y0, x1: w.x1, y1 } })),
+  }
+}
+
+function nameOnlyLine(y, name) {
+  const y0 = y - 40
+  const y1 = y + 40
+  let x = 280
+  const words = [{ text: 'A', x0: 106, x1: 113 }]
+  for (const part of name.split(' ')) {
+    const width = part.length * 18 + 20
+    words.push({ text: part, x0: x, x1: x + width })
+    x += width + 10
+  }
+  words.push({ text: 'pts', x0: 896, x1: 946 })
+  return {
+    text: words.map((w) => w.text).join(' ') + '\n',
+    bbox: { x0: 106, y0, x1: 1071, y1 },
+    words: words.map((w) => ({ text: w.text, bbox: { x0: w.x0, y0, x1: w.x1, y1 } })),
+  }
+}
+
+// Mirrors Score_Info_1a.jpg: 7 complete rows plus a trailing row (Air Groove)
 // cut off before its distance pill renders.
 function screenshot1Lines() {
   const rows = sampleMatch.slice(0, 8)
@@ -64,7 +101,7 @@ function screenshot1Lines() {
   return lines
 }
 
-// Mirrors Score_Info_2.jpg: header noise, then 7 complete rows. No usable
+// Mirrors Score_Info_1b.jpg: header noise, then 7 complete rows. No usable
 // fragment at all for the split row (matches the real OCR run).
 function screenshot2Lines() {
   const rows = sampleMatch.slice(8, 15)
@@ -154,6 +191,50 @@ describe('parseScreenshotRows', () => {
     }
     expect(parseScreenshotRows([line])).toEqual([])
   })
+
+  it('rescues a row Tesseract split into a points-only line and a separate name-only line', () => {
+    const lines = [pointsOnlyLine(949, 50458), nameOnlyLine(977, 'El Condor Pasa')]
+    const rows = parseScreenshotRows(lines)
+    expect(rows).toEqual([{ umaName: 'El Condor Pasa', distance: null, points: 50458 }])
+  })
+
+  it('does not rescue a name-only line whose text is not a known uma name', () => {
+    const lines = [pointsOnlyLine(949, 50458), nameOnlyLine(977, 'Not A Real Uma')]
+    expect(parseScreenshotRows(lines)).toEqual([])
+  })
+
+  it('does not rescue a points-only/name-only pair that is too far apart to be the same row', () => {
+    const lines = [pointsOnlyLine(200, 50458), nameOnlyLine(900, 'El Condor Pasa')]
+    expect(parseScreenshotRows(lines)).toEqual([])
+  })
+
+  it('still resolves the distance for a rescued split row when one is nearby', () => {
+    const lines = [pointsOnlyLine(949, 50458), nameOnlyLine(977, 'El Condor Pasa'), distanceLine(1028, 'Dirt')]
+    const rows = parseScreenshotRows(lines)
+    expect(rows).toEqual([{ umaName: 'El Condor Pasa', distance: 'Dirt', points: 50458 }])
+  })
+})
+
+describe('findLeadingDistance', () => {
+  it('returns the distance when it sits above every name line', () => {
+    const lines = [distanceLine(429, 'Long'), nameLine(520, 'El Condor Pasa', 55887)]
+    expect(findLeadingDistance(lines)).toBe('Long')
+  })
+
+  it('returns null when the only distance line belongs to a normal row (at or below the first name line)', () => {
+    const lines = [nameLine(500, 'Test Uma', 1000), distanceLine(573, 'Sprint')]
+    expect(findLeadingDistance(lines)).toBeNull()
+  })
+
+  it('returns null when there is no distance line', () => {
+    const lines = [nameLine(500, 'Test Uma', 1000)]
+    expect(findLeadingDistance(lines)).toBeNull()
+  })
+
+  it('returns null when there is no name line to compare against', () => {
+    const lines = [distanceLine(250, 'Long')]
+    expect(findLeadingDistance(lines)).toBeNull()
+  })
 })
 
 describe('mergeScreenshotRows', () => {
@@ -219,5 +300,28 @@ describe('mergeScreenshotRows', () => {
 
     expect(rows.find((r) => r.umaName === 'Air Groove').distance).toBeNull()
     expect(warnings).toEqual(['Air Groove: distance could not be determined — please select it manually.'])
+  })
+
+  it('uses the leading-distance fragment to resolve the split row, even when elimination could not (partial roster)', () => {
+    const rowsA = sampleMatch.slice(0, 8).map((row) => ({ ...row }))
+    rowsA[7] = { ...rowsA[7], distance: null } // Air Groove, but only 8 rows total
+    const { rows, warnings } = mergeScreenshotRows(rowsA, [], 'Sprint')
+
+    expect(rows.find((r) => r.umaName === 'Air Groove').distance).toBe('Sprint')
+    expect(warnings).toEqual([])
+  })
+
+  it('ignores the leading-distance fragment when more than one row is still missing a distance', () => {
+    const rowsA = sampleMatch.map((row) => ({ ...row }))
+    rowsA[1] = { ...rowsA[1], distance: null } // Silence Suzuka
+    rowsA[7] = { ...rowsA[7], distance: null } // Air Groove
+    const { rows, warnings } = mergeScreenshotRows(rowsA, [], 'Sprint')
+
+    expect(rows.find((r) => r.umaName === 'Silence Suzuka').distance).toBeNull()
+    expect(rows.find((r) => r.umaName === 'Air Groove').distance).toBeNull()
+    expect(warnings).toEqual([
+      'Silence Suzuka: distance could not be determined — please select it manually.',
+      'Air Groove: distance could not be determined — please select it manually.',
+    ])
   })
 })
