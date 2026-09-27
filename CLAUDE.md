@@ -29,6 +29,7 @@ A free, browser-based tool that uses client-side OCR to read **Uma Musume: Prett
 | Frontend framework | React with Vite | **Decided** (developer) |
 | Game version | Global, English UI | **Decided** (developer) |
 | MVP input | "Score Info" screenshots (2 scrolling screenshots cover all 15 umas per match); the entry form accepts a batch of screenshots for several matches at once, paired up by upload order | **Decided** (developer) |
+| Batch OCR roster fallback | A batch upload's matches are assumed to share one identical 15-uma roster (same names and distances; a distance change counts as replacing that uma). An OCR gap (unresolved name or null distance) in any match is filled using whatever any other match in the same batch already resolved for the same uma, in either direction; conflicting confident reads warn instead of guessing | **Decided** (developer) — see `docs/decisions.md` |
 | MVP calculation | Compare averages across all 15 umas using raw Gained Scores, with no adjustments (**Simple Mode** only) | **Decided** (developer) |
 | Advanced Mode (Phase 2) | Ranks umas by `S = I + T` (the uma's own score plus the score its Rating adds to the team), after removing Ace, Support, and Opponent Rating effects from each match's score. The player enters Support rate and Team Rating once and keeps them current, each match snapshots them, and Aces are flagged per match; assumes the player always picks the Top Option | **Decided** (developer) — see `docs/roadmap.md` and `docs/decisions.md` |
 | Opponent rating estimate (Advanced Mode) | Empirical curve of the Top Option's opponent rating multiplier vs. the player's Team Rating, fitted from developer-collected samples (not from Team Rank floors); assumed to continue beyond the sampled ratings, with a site disclaimer | **Decided** (developer) — see `docs/team-trials-reference.md` |
@@ -79,14 +80,14 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
     │   ├── tesseractClient.js       # Tesseract.js worker wrapper (lazy-loaded, singleton worker)
     │   ├── tesseractClient.test.js  # Unit tests for the wrapper logic (singleton reuse, flattening, terminate) against a mocked tesseract.js
     │   ├── tesseractClient.smoke.test.js  # Skipped-by-default real-OCR test against the fixtures
-    │   ├── parseScoreInfo.js        # Bbox-based row parsing (parseScreenshotRows) + two-screenshot de-dup (mergeScreenshotRows) + live row-correctness warnings (validateRows)
+    │   ├── parseScoreInfo.js        # Bbox-based row parsing (parseScreenshotRows) + two-screenshot de-dup (mergeScreenshotRows) + cross-match batch-roster fallback (applyBatchRosterFallback) + live row-correctness warnings (validateRows)
     │   ├── parseScoreInfo.test.js   # Parsing/merge/validation unit tests (synthetic bbox fixtures, no Tesseract needed)
     │   ├── umaNames.js              # Known playable uma names (developer-supplied); exact lookup (lookupUmaName) for the split-row noise gate, closest-match correction (resolveUmaName/closestUmaName) for a confirmed row's name
     │   ├── umaNames.test.js         # Unit tests for exact lookup and closest-match correction
     │   └── __fixtures__/            # Real Score Info screenshots for OCR dev/testing, plus sampleMatch.js (15-row reference data)
     ├── components/
     │   ├── RosterDashboard.jsx      # Per-uma averages, weakest-link recommendation, delete-uma
-    │   ├── MatchEntryForm.jsx       # Match entry: manual typing, or upload Score Info screenshots (one or more matches per batch) to auto-fill via OCR
+    │   ├── MatchEntryForm.jsx       # Match entry: manual typing, or upload Score Info screenshots (one or more matches per batch) to auto-fill via OCR, filling batch-wide OCR gaps via the roster fallback
     │   └── OcrDebugPanel.jsx        # Dev-only (DEV build) raw-OCR-text diagnostic tool
     ├── App.jsx
     └── main.jsx

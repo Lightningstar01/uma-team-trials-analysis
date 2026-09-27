@@ -5,6 +5,7 @@ import {
   findLeadingDistance,
   collectNameCorrectionWarnings,
   collectPointsCorrectionWarnings,
+  applyBatchRosterFallback,
   validateRows,
 } from './parseScoreInfo.js'
 import { sampleMatch } from './__fixtures__/sampleMatch.js'
@@ -90,6 +91,27 @@ function pointsPrefixLine(y, digits) {
   return {
     text: words.map((w) => w.text).join(' ') + '\n',
     bbox: { x0: 105, y0, x1: Math.max(...words.map((w) => w.x1)), y1 },
+    words: words.map((w) => ({ text: w.text, bbox: { x0: w.x0, y0, x1: w.x1, y1 } })),
+  }
+}
+
+// Modeled on the real word bboxes Tesseract produced for Maruzensky's row on
+// Score_Info_7b.jpg: "(<i 45,216 |" - the full comma-formatted score sitting
+// in the points column with no "pts" suffix at all, one line above the row's
+// name+"pts" line (which itself has no digits - see nameOnlyLine below, see
+// docs/decisions.md).
+function bareFullPointsLine(y, points) {
+  const y0 = y - 30
+  const y1 = y + 30
+  const pointsStr = points.toLocaleString('en-US')
+  const words = [
+    { text: '(<i', x0: 92, x1: 130 },
+    { text: pointsStr, x0: 752, x1: 752 + pointsStr.length * 14 },
+    { text: '|', x0: 1074, x1: 1080 },
+  ]
+  return {
+    text: words.map((w) => w.text).join(' ') + '\n',
+    bbox: { x0: 92, y0, x1: 1080, y1 },
     words: words.map((w) => ({ text: w.text, bbox: { x0: w.x0, y0, x1: w.x1, y1 } })),
   }
 }
@@ -281,6 +303,48 @@ describe('parseScreenshotRows', () => {
     const rows = parseScreenshotRows(lines)
     expect(rows).toEqual([{ umaName: 'Oguri Cap', distance: null, points: 5000 }])
   })
+
+  it('rescues a row Tesseract split into a bare full-points line (no "pts") and a separate name-only line', () => {
+    // Mirrors the real Score_Info_7b.jpg misread (see docs/decisions.md):
+    // "(<i 45,216 |" then "“2 Maruzensky ’ pts" on the very next line.
+    const lines = [bareFullPointsLine(949, 45216), nameOnlyLine(977, 'Maruzensky')]
+    const rows = parseScreenshotRows(lines)
+    expect(rows).toEqual([{ umaName: 'Maruzensky', distance: null, points: 45216 }])
+  })
+
+  it('still resolves the distance for a rescued bare-full-points split row when one is nearby', () => {
+    const lines = [bareFullPointsLine(949, 45216), nameOnlyLine(977, 'Maruzensky'), distanceLine(1028, 'Mile')]
+    const rows = parseScreenshotRows(lines)
+    expect(rows).toEqual([{ umaName: 'Maruzensky', distance: 'Mile', points: 45216 }])
+  })
+
+  it('does not rescue a bare full-points line paired with a name-only line that is not a known uma', () => {
+    const lines = [bareFullPointsLine(949, 45216), nameOnlyLine(977, 'Not A Real Uma')]
+    expect(parseScreenshotRows(lines)).toEqual([])
+  })
+
+  it('does not rescue a bare-full-points/name-only pair that is too far apart to be the same row', () => {
+    const lines = [bareFullPointsLine(200, 45216), nameOnlyLine(900, 'Maruzensky')]
+    expect(parseScreenshotRows(lines)).toEqual([])
+  })
+
+  it('reads a bare full-points token directly off a name+points line when the name column is also present', () => {
+    const y0 = 480
+    const y1 = 520
+    const words = [
+      { text: '~~', x0: 80, x1: 167 },
+      { text: 'Oguri', x0: 279, x1: 340 },
+      { text: 'Cap', x0: 350, x1: 400 },
+      { text: '42,711', x0: 752, x1: 830 },
+    ]
+    const line = {
+      text: '~~ Oguri Cap 42,711\n',
+      bbox: { x0: 80, y0, x1: 830, y1 },
+      words: words.map((w) => ({ text: w.text, bbox: { x0: w.x0, y0, x1: w.x1, y1 } })),
+    }
+    const rows = parseScreenshotRows([line])
+    expect(rows).toEqual([{ umaName: 'Oguri Cap', distance: null, points: 42711 }])
+  })
 })
 
 describe('collectPointsCorrectionWarnings', () => {
@@ -439,6 +503,248 @@ describe('mergeScreenshotRows', () => {
     expect(warnings).toContain(
       `${rowsA[0].umaName}: OCR split the score across two lines — corrected from 711 to 42,711 pts, please verify.`
     )
+  })
+})
+
+describe('applyBatchRosterFallback', () => {
+  const match = (rows, warnings = []) => ({ rows, warnings })
+
+  it('fills a null distance in a later match using an earlier match\'s confidently-resolved row', () => {
+    const matches = [
+      match([{ umaName: 'Oguri Cap', distance: 'Dirt', points: 40000 }]),
+      match(
+        [{ umaName: 'Oguri Cap', distance: null, points: 42711 }],
+        ['Oguri Cap: distance could not be determined — please select it manually.']
+      ),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[1].rows).toEqual([{ umaName: 'Oguri Cap', distance: 'Dirt', points: 42711 }])
+    expect(result[1].warnings).toEqual([])
+    expect(result[0].rows).toEqual(matches[0].rows)
+  })
+
+  it("fills a null distance in an earlier match using a later match's confidently-resolved row (not order-dependent)", () => {
+    const matches = [
+      match(
+        [{ umaName: 'Oguri Cap', distance: null, points: 42711 }],
+        ['Oguri Cap: distance could not be determined — please select it manually.']
+      ),
+      match([{ umaName: 'Oguri Cap', distance: 'Dirt', points: 40000 }]),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[0].rows).toEqual([{ umaName: 'Oguri Cap', distance: 'Dirt', points: 42711 }])
+    expect(result[0].warnings).toEqual([])
+  })
+
+  it('resolves a misread name by single-gap elimination against a name confidently read only in another match', () => {
+    const matches = [
+      match([{ umaName: 'Vodka', correctedFrom: 'illegible', distance: 'Sprint', points: 42711 }]),
+      match([{ umaName: 'Oguri Cap', distance: 'Sprint', points: 40000 }]),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[0].rows).toEqual([
+      { umaName: 'Oguri Cap', correctedFrom: 'illegible', distance: 'Sprint', points: 42711 },
+    ])
+  })
+
+  it("combines a misread name in one match with a missing distance in another for the same uma (the motivating scenario)", () => {
+    const matches = [
+      match([{ umaName: 'Vodka', correctedFrom: 'illegible', distance: 'Dirt', points: 42711 }]),
+      match([{ umaName: 'Oguri Cap', distance: null, points: 40000 }]),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[0].rows).toEqual([
+      { umaName: 'Oguri Cap', correctedFrom: 'illegible', distance: 'Dirt', points: 42711 },
+    ])
+    expect(result[1].rows).toEqual([{ umaName: 'Oguri Cap', distance: 'Dirt', points: 40000 }])
+  })
+
+  it('never overrides an already-resolved field, even when another match disagrees', () => {
+    const matches = [
+      match([{ umaName: 'Grass Wonder', distance: 'Long', points: 50000 }]),
+      match([{ umaName: 'Grass Wonder', distance: 'Sprint', points: 51000 }]),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[0].rows[0].distance).toBe('Long')
+    expect(result[1].rows[0].distance).toBe('Sprint')
+  })
+
+  it('leaves a row alone when two or more names are missing from its match (ambiguous)', () => {
+    const matches = [
+      match([
+        { umaName: 'Special Week', distance: 'Medium', points: 1 },
+        { umaName: 'Agnes Tachyon', distance: 'Medium', points: 2 },
+      ]),
+      match([{ umaName: 'Vodka', correctedFrom: 'x', distance: null, points: 3 }]),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[1].rows).toEqual(matches[1].rows)
+  })
+
+  it('leaves rows alone when two or more uncertain rows are left over in the same match (ambiguous)', () => {
+    const matches = [
+      match([{ umaName: 'Special Week', distance: 'Medium', points: 1 }]),
+      match([
+        { umaName: 'Vodka', correctedFrom: 'x', distance: null, points: 2 },
+        { umaName: 'Gold Ship', correctedFrom: 'y', distance: null, points: 3 },
+      ]),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[1].rows).toEqual(matches[1].rows)
+  })
+
+  it('detects a distance conflict, excludes the uma from any fill, and warns each contributing match', () => {
+    const matches = [
+      match([{ umaName: 'Grass Wonder', distance: 'Long', points: 50000 }]),
+      match([{ umaName: 'Grass Wonder', distance: 'Sprint', points: 51000 }]),
+      match([{ umaName: 'Grass Wonder', distance: null, points: 52000 }]),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[0].warnings).toContain(
+      'Grass Wonder: distance disagrees with another match in this batch (Long here vs Sprint elsewhere) — please verify your roster didn\'t change mid-batch.'
+    )
+    expect(result[1].warnings).toContain(
+      'Grass Wonder: distance disagrees with another match in this batch (Sprint here vs Long elsewhere) — please verify your roster didn\'t change mid-batch.'
+    )
+    expect(result[2].rows[0].distance).toBeNull()
+    expect(result[2].warnings.some((w) => w.includes('disagrees'))).toBe(false)
+  })
+
+  it('does not add a conflict warning when only one match confidently reads a given uma\'s distance', () => {
+    const matches = [
+      match([{ umaName: 'Oguri Cap', distance: 'Dirt', points: 40000 }]),
+      match([{ umaName: 'Oguri Cap', distance: null, points: 42711 }]),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result.some((m) => m.warnings.some((w) => w.includes('disagrees')))).toBe(false)
+  })
+
+  it('drops both stale warnings (name and distance) and adds a fresh name-correction warning when a row is fixed on both fields', () => {
+    const matches = [
+      match([{ umaName: 'Oguri Cap', distance: 'Dirt', points: 1 }]),
+      match(
+        [{ umaName: 'Vodka', correctedFrom: 'illegible', distance: null, points: 2 }],
+        [
+          'Vodka: OCR read "illegible" — corrected to the closest known uma, please verify.',
+          'Vodka: distance could not be determined — please select it manually.',
+        ]
+      ),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[1].rows).toEqual([
+      { umaName: 'Oguri Cap', correctedFrom: 'illegible', distance: 'Dirt', points: 2 },
+    ])
+    expect(result[1].warnings).toEqual([
+      'Oguri Cap: OCR read "illegible" — corrected to the closest known uma, please verify.',
+    ])
+  })
+
+  it('leaves unrelated warnings (screenshots-disagreed, points-correction) untouched', () => {
+    const matches = [
+      match([{ umaName: 'Oguri Cap', distance: 'Dirt', points: 40000 }]),
+      match(
+        [{ umaName: 'Oguri Cap', distance: null, points: 42711, pointsCorrectedFrom: 711 }],
+        [
+          'Oguri Cap: screenshots disagreed on points (42711 vs 42611 pts) — please verify.',
+          'Oguri Cap: OCR split the score across two lines — corrected from 711 to 42,711 pts, please verify.',
+          'Oguri Cap: distance could not be determined — please select it manually.',
+        ]
+      ),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[1].warnings).toEqual([
+      'Oguri Cap: screenshots disagreed on points (42711 vs 42611 pts) — please verify.',
+      'Oguri Cap: OCR split the score across two lines — corrected from 711 to 42,711 pts, please verify.',
+    ])
+  })
+
+  it('is a no-op for a single-match "batch"', () => {
+    const matches = [
+      match(
+        [{ umaName: 'Oguri Cap', distance: null, points: 42711 }],
+        ['Oguri Cap: distance could not be determined — please select it manually.']
+      ),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result).toEqual(matches)
+  })
+
+  it('inserts a row Tesseract dropped entirely, filling its distance from the roster and leaving points blank', () => {
+    const matches = [
+      match([
+        { umaName: 'Super Creek', distance: 'Long', points: 80936 },
+        { umaName: 'Maruzensky', distance: 'Mile', points: 66503 },
+      ]),
+      match([{ umaName: 'Super Creek', distance: 'Long', points: 80000 }]), // Maruzensky's row missing entirely
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[1].rows).toEqual([
+      { umaName: 'Super Creek', distance: 'Long', points: 80000 },
+      { umaName: 'Maruzensky', distance: 'Mile', points: '' },
+    ])
+    expect(result[1].warnings).toContain(
+      "Maruzensky: row could not be found in this match's screenshots — please enter the points manually."
+    )
+  })
+
+  it('does not insert a row when two or more names are missing entirely from a match (ambiguous)', () => {
+    const matches = [
+      match([
+        { umaName: 'Special Week', distance: 'Medium', points: 1 },
+        { umaName: 'Agnes Tachyon', distance: 'Medium', points: 2 },
+        { umaName: 'Gold Ship', distance: 'Sprint', points: 3 },
+      ]),
+      match([{ umaName: 'Special Week', distance: 'Medium', points: 4 }]), // missing both Agnes Tachyon and Gold Ship
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[1].rows).toEqual([{ umaName: 'Special Week', distance: 'Medium', points: 4 }])
+    expect(result[1].warnings).toEqual([])
+  })
+
+  it('works across 3+ matches: a gap in the third match is filled using data from the first', () => {
+    const matches = [
+      match([{ umaName: 'Oguri Cap', distance: 'Dirt', points: 1 }]),
+      match([{ umaName: 'Special Week', distance: 'Medium', points: 2 }]),
+      match([
+        { umaName: 'Oguri Cap', distance: null, points: 3 },
+        { umaName: 'Special Week', distance: 'Medium', points: 4 },
+      ]),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[2].rows).toEqual([
+      { umaName: 'Oguri Cap', distance: 'Dirt', points: 3 },
+      { umaName: 'Special Week', distance: 'Medium', points: 4 },
+    ])
   })
 })
 

@@ -33,6 +33,20 @@ const POINTS_PREFIX_X_MIN = NAME_COLUMN_X_RANGE.max
 const POINTS_PREFIX_REGEX = /^\d{1,3}$/
 const MAX_POINTS_SPLIT_GAP = 40
 
+// A full comma-formatted number sitting in the points column (same x0≈752
+// boundary as above) but on a line with no "pts" suffix at all - a
+// different split-row variant from the prefix case above, where the whole
+// score lands on one line and the name (with "pts", but no digits) lands on
+// the other. Real fixture: Maruzensky's row on `Score_Info_7b.jpg` came back
+// as "(<i 45,216 |" and "“2 Maruzensky ’ pts" on the next line - the row
+// used to be dropped entirely, since neither line matched POINTS_REGEX (no
+// "pts" on the first, no digits on the second) nor the prefix case above
+// (this token has a comma, so it can never be a bare 1-3 digit prefix).
+// Handled the same way as the orphan name/points pairing below: this line
+// becomes an orphan points value, later paired by proximity with whatever
+// orphan name line is nearest it.
+const BARE_POINTS_REGEX = /^\d{1,3}(?:,\d{3})+$/
+
 // Fixed roster shape (see CLAUDE.md / team-trials-reference.md): 15 umas,
 // exactly 3 per distance category. Used to infer a row's distance by
 // elimination when neither screenshot captured it directly for that row.
@@ -154,6 +168,21 @@ export function parseScreenshotRows(lines) {
       continue
     }
 
+    const barePointsWord = words.find(
+      (w) => w.bbox.x0 >= NAME_COLUMN_X_RANGE.max && BARE_POINTS_REGEX.test(w.text)
+    )
+    if (barePointsWord) {
+      const rawName = extractUmaName(words)
+      const points = Number(barePointsWord.text.replace(/,/g, ''))
+      if (rawName) {
+        const { name: umaName, exact } = resolveUmaName(rawName)
+        nameCandidates.push({ umaName, points, yc, rawName: exact ? undefined : rawName })
+      } else {
+        orphanPoints.push({ points, yc })
+      }
+      continue
+    }
+
     const distanceMatch = findDistanceInLine(text)
     if (distanceMatch) {
       distanceCandidates.push({ distance: distanceMatch, yc })
@@ -241,6 +270,10 @@ function normalizeName(name) {
   return name.trim().toLowerCase()
 }
 
+function distanceMissingWarning(umaName) {
+  return `${umaName}: distance could not be determined — please select it manually.`
+}
+
 // Fills a row's distance by elimination when it's still null after merging
 // both screenshots: the roster always has exactly 3 umas per distance
 // category, so if exactly one row is short a distance and exactly one
@@ -253,7 +286,7 @@ function inferMissingDistances(rows, warnings) {
 
   if (rows.length !== ROSTER_SIZE || missing.length !== 1) {
     for (const row of missing) {
-      warnings.push(`${row.umaName}: distance could not be determined — please select it manually.`)
+      warnings.push(distanceMissingWarning(row.umaName))
     }
     return
   }
@@ -267,7 +300,7 @@ function inferMissingDistances(rows, warnings) {
   if (short.length === 1 && counts.get(short[0]) === EXPECTED_PER_DISTANCE - 1) {
     missing[0].distance = short[0]
   } else {
-    warnings.push(`${missing[0].umaName}: distance could not be determined — please select it manually.`)
+    warnings.push(distanceMissingWarning(missing[0].umaName))
   }
 }
 
@@ -394,4 +427,146 @@ export function validateRows(rows) {
   }
 
   return warnings
+}
+
+// Applies a batch-wide fallback across every match uploaded together, under
+// the assumption (confirmed by the developer) that every match in one batch
+// shares an identical 15-uma roster, including each uma's distance -
+// changing an uma's distance counts as replacing it for this feature's
+// purposes (see docs/decisions.md). The Score Info screen's row order isn't
+// stable across matches, so matching is always by name, never by position.
+//
+// Runs as two passes over the whole batch rather than one: names are
+// resolved first, by the same single-gap elimination inferMissingDistances
+// already uses for distances - just applied to every match's confidently-
+// read names instead of same-match distance-category counts. Distances are
+// then filled from a map built *after* those name fixes, so a row whose
+// identity only became known through elimination can still supply its own
+// distance to fill another match's gap. A field OCR already resolved
+// successfully (an exact-match name, or a non-null distance) is never
+// overridden. If two matches confidently disagree on a uma's distance,
+// neither value is used to fill anything anywhere and both get a warning
+// naming the disagreement instead of a guess.
+//
+// The name pass also covers a row Tesseract dropped entirely (no
+// name+points line recognized at all, not just misread) - not only a
+// misread row left over to reassign. When a match is unambiguously short
+// exactly one known uma and has no uncertain row to pin that gap on, a new
+// row is inserted for that uma with points left blank (there's no OCR
+// reading to recover a real per-match score from) - its distance still gets
+// a chance to be filled by the distance pass below, same as any other row.
+export function applyBatchRosterFallback(matches) {
+  const rows = matches.map((match) => match.rows)
+
+  const originalNameByRow = new Map()
+  for (const matchRows of rows) {
+    for (const row of matchRows) originalNameByRow.set(row, row.umaName)
+  }
+
+  // --- name pass: single-gap elimination against every exact-match name in the batch ---
+  const canonicalNames = new Map()
+  for (const matchRows of rows) {
+    for (const row of matchRows) {
+      if (!row.correctedFrom) canonicalNames.set(normalizeName(row.umaName), row.umaName)
+    }
+  }
+  const knownNames = new Set(canonicalNames.keys())
+
+  const nameFixes = rows.map(() => [])
+  const insertedRows = rows.map(() => [])
+
+  rows.forEach((matchRows, matchIndex) => {
+    const resolvedNames = new Set(
+      matchRows.filter((row) => !row.correctedFrom).map((row) => normalizeName(row.umaName))
+    )
+    const missing = [...knownNames].filter((name) => !resolvedNames.has(name))
+    const uncertain = matchRows.filter(
+      (row) => row.correctedFrom && !knownNames.has(normalizeName(row.umaName))
+    )
+
+    if (missing.length === 1 && uncertain.length === 1) {
+      const row = uncertain[0]
+      row.umaName = canonicalNames.get(missing[0])
+      nameFixes[matchIndex].push(row)
+    } else if (missing.length === 1 && uncertain.length === 0) {
+      const row = { umaName: canonicalNames.get(missing[0]), distance: null, points: '' }
+      matchRows.push(row)
+      insertedRows[matchIndex].push(row)
+    }
+  })
+
+  // --- distance pass: a shared map built from every (possibly just-fixed) confident reading ---
+  const distanceReadings = new Map()
+  rows.forEach((matchRows, matchIndex) => {
+    for (const row of matchRows) {
+      const key = normalizeName(row.umaName)
+      if (!knownNames.has(key) || row.distance == null) continue
+      if (!distanceReadings.has(key)) distanceReadings.set(key, new Map())
+      const byDistance = distanceReadings.get(key)
+      if (!byDistance.has(row.distance)) byDistance.set(row.distance, new Set())
+      byDistance.get(row.distance).add(matchIndex)
+    }
+  })
+
+  const distanceMap = new Map()
+  const conflicts = new Map()
+  for (const [key, byDistance] of distanceReadings) {
+    if (byDistance.size === 1) {
+      distanceMap.set(key, [...byDistance.keys()][0])
+    } else {
+      conflicts.set(key, byDistance)
+    }
+  }
+
+  const distanceFixes = rows.map(() => [])
+  rows.forEach((matchRows, matchIndex) => {
+    for (const row of matchRows) {
+      if (row.distance != null) continue
+      const key = normalizeName(row.umaName)
+      if (distanceMap.has(key)) {
+        row.distance = distanceMap.get(key)
+        distanceFixes[matchIndex].push(row)
+      }
+    }
+  })
+
+  // --- warnings: drop what this pass just fixed, add what it couldn't resolve ---
+  return matches.map((match, matchIndex) => {
+    let warnings = [...match.warnings]
+
+    for (const row of nameFixes[matchIndex]) {
+      const stale = collectNameCorrectionWarnings([
+        { umaName: originalNameByRow.get(row), correctedFrom: row.correctedFrom },
+      ])
+      warnings = warnings.filter((w) => !stale.includes(w))
+    }
+    warnings = [...warnings, ...collectNameCorrectionWarnings(nameFixes[matchIndex])]
+
+    for (const row of insertedRows[matchIndex]) {
+      warnings.push(
+        `${row.umaName}: row could not be found in this match's screenshots — please enter the points manually.`
+      )
+    }
+
+    for (const row of distanceFixes[matchIndex]) {
+      warnings = warnings.filter((w) => w !== distanceMissingWarning(originalNameByRow.get(row)))
+    }
+
+    for (const [key, byDistance] of conflicts) {
+      const distancesHere = [...byDistance].filter(([, indices]) => indices.has(matchIndex))
+      if (distancesHere.length === 0) continue
+      const elsewhere = [...byDistance]
+        .filter(([, indices]) => !indices.has(matchIndex))
+        .map(([distance]) => distance)
+      if (elsewhere.length === 0) continue
+
+      const umaName = canonicalNames.get(key)
+      const here = distancesHere.map(([distance]) => distance).join('/')
+      warnings.push(
+        `${umaName}: distance disagrees with another match in this batch (${here} here vs ${elsewhere.join('/')} elsewhere) — please verify your roster didn't change mid-batch.`
+      )
+    }
+
+    return { rows: rows[matchIndex], warnings }
+  })
 }

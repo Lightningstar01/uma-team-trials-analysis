@@ -9,6 +9,7 @@ import {
   findLeadingDistance,
   collectNameCorrectionWarnings,
   collectPointsCorrectionWarnings,
+  applyBatchRosterFallback,
   validateRows,
 } from '../ocr/parseScoreInfo'
 
@@ -89,22 +90,24 @@ function chunkIntoPairs(files) {
   return chunks
 }
 
-async function buildDraftFromScreenshots(files) {
+// Returns a match's same-match-merged/inferred rows, pre grid-shaping (a
+// null distance may still be present) - toOcrGridRows runs later, after the
+// batch-wide roster fallback has had a chance to fill gaps using other
+// matches in the same upload.
+async function buildMergedMatch(files) {
   const recognized = await Promise.all(files.map((file) => recognizeImage(file)))
 
   if (recognized.length === 1) {
     const rows = parseScreenshotRows(recognized[0].lines)
     const warnings = [...collectNameCorrectionWarnings(rows), ...collectPointsCorrectionWarnings(rows)]
-    return { rows: toOcrGridRows(rows, warnings), source: 'ocr', warnings }
+    return { rows, warnings }
   }
 
   const [{ lines: linesA }, { lines: linesB }] = recognized
   const rowsA = parseScreenshotRows(linesA)
   const rowsB = parseScreenshotRows(linesB)
   const leadingDistanceForB = findLeadingDistance(linesB)
-  const { rows: mergedRows, warnings } = mergeScreenshotRows(rowsA, rowsB, leadingDistanceForB)
-
-  return { rows: toOcrGridRows(mergedRows, warnings), source: 'ocr', warnings }
+  return mergeScreenshotRows(rowsA, rowsB, leadingDistanceForB)
 }
 
 function MatchEntryForm() {
@@ -174,7 +177,13 @@ function MatchEntryForm() {
     setOcrError('')
 
     try {
-      const drafts = await Promise.all(chunkIntoPairs(files).map(buildDraftFromScreenshots))
+      const merged = await Promise.all(chunkIntoPairs(files).map(buildMergedMatch))
+      const withFallback = applyBatchRosterFallback(merged)
+      const drafts = withFallback.map(({ rows, warnings }) => ({
+        rows: toOcrGridRows(rows, warnings),
+        source: 'ocr',
+        warnings,
+      }))
       setMatches(drafts)
       setOcrStatus('idle')
     } catch {
@@ -256,6 +265,12 @@ function MatchEntryForm() {
             Upload Score Info screenshots for one or more matches — select them in order, two per
             match (top screenshot, then bottom), oldest match first
           </label>
+          <p className="ocr-disclaimer">
+            Batches assume every match has the identical 15-uma roster, including each uma's
+            distance — changing an uma's distance counts as replacing it. If your roster changed
+            partway through the batch, upload it as separate batches instead, or check and fix
+            the affected rows after upload.
+          </p>
           <input
             id="score-info-upload"
             ref={fileInputRef}
