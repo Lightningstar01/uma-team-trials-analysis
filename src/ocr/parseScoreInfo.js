@@ -1,4 +1,4 @@
-import { DISTANCE_ORDER } from '../db/constants.js'
+import { DISTANCE_ORDER, ROSTER_SIZE } from '../db/constants.js'
 import { lookupUmaName, resolveUmaName } from './umaNames.js'
 
 // Matches "80,936 pts" / "999pts" / "PTS" etc. Group 1 is the digits+commas.
@@ -47,10 +47,9 @@ const MAX_POINTS_SPLIT_GAP = 40
 // orphan name line is nearest it.
 const BARE_POINTS_REGEX = /^\d{1,3}(?:,\d{3})+$/
 
-// Fixed roster shape (see CLAUDE.md / team-trials-reference.md): 15 umas,
-// exactly 3 per distance category. Used to infer a row's distance by
-// elimination when neither screenshot captured it directly for that row.
-const ROSTER_SIZE = 15
+// Fixed roster shape (ROSTER_SIZE umas, exactly 3 per distance category).
+// Used to infer a row's distance by elimination when neither screenshot
+// captured it directly for that row.
 const EXPECTED_PER_DISTANCE = ROSTER_SIZE / DISTANCE_ORDER.length
 
 // Below this, a score is more likely a misread (e.g. a leading digit group

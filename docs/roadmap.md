@@ -12,6 +12,8 @@ Feature timeline for the Uma Team Trials Score Auditor. Items tagged **[Develope
 - [x] **Rolling average per uma [Developer]:** over all history.
 - [x] **Delete/upgrade an uma [Developer]:** when the player replaces *or upgrades* an uma, they delete it in the app. This nulls all existing data for that uma; data recorded afterward is valid.
 - [x] **Weakest link and upgrade recommendation [Developer]:** compare averages across all 15 umas. Whoever has the lowest raw average is recommended to upgrade next.
+- [x] **Player-set roster [Developer]:** fill the roster by hand or auto-fill it from the first screenshot batch; view each uma's every score, average, high, and low.
+- [x] **Undo a match [Developer]:** delete all of a logged match's scores.
 - [ ] **Export/Import backup [Blueprint]** as a `.json` file.
 - [ ] **Request persistent storage [Blueprint]** via `navigator.storage.persist()`.
 

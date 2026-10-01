@@ -1,183 +1,210 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { addMatch, getLatestMatchEntries, getRosterSummary, deleteUmaHistory } from './matches.js'
+import {
+  addMatches,
+  createRosterWithMatches,
+  deleteMatch,
+  deleteUmaScores,
+  findWeakestLink,
+  getMatchHistory,
+  getRosterStats,
+} from './matches.js'
+import { createRoster } from './roster.js'
 import { db } from './db.js'
+import { DISTANCE_ORDER } from './constants.js'
+
+// 15 slots, 3 per distance: "Uma 1".."Uma 15".
+function makeRosterRows() {
+  return Array.from({ length: 15 }, (_, i) => ({
+    umaName: `Uma ${i + 1}`,
+    distance: DISTANCE_ORDER[Math.floor(i / 3)],
+  }))
+}
 
 beforeEach(async () => {
   await db.matchEntries.clear()
   await db.matches.clear()
+  await db.roster.clear()
 })
 
-describe('addMatch', () => {
-  it('persists a match row and its entries linked by matchId', async () => {
-    const rows = [
-      { umaName: 'Special Week', distance: 'Medium', points: 80936 },
-      { umaName: 'Silence Suzuka', distance: 'Mile', points: 75000 },
+describe('addMatches', () => {
+  it('persists each match with its entries linked by matchId', async () => {
+    const [a, b] = await createRoster(makeRosterRows())
+    const [first, second] = await addMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      matches: [
+        { source: 'ocr', entries: [{ rosterId: a, points: 100 }, { rosterId: b, points: 200 }] },
+        { entries: [{ rosterId: a, points: 300 }] },
+      ],
+    })
+
+    expect(await db.matches.get(first)).toMatchObject({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      source: 'ocr',
+    })
+    expect(await db.matches.get(second)).toMatchObject({ source: 'manual' })
+    expect(typeof (await db.matches.get(first)).createdAt).toBe('number')
+
+    const entries = await db.matchEntries.where('matchId').equals(first).toArray()
+    expect(entries.map(({ rosterId, points }) => ({ rosterId, points }))).toEqual([
+      { rosterId: a, points: 100 },
+      { rosterId: b, points: 200 },
+    ])
+  })
+})
+
+describe('createRosterWithMatches', () => {
+  it('creates the roster and links each match row to its slot by name', async () => {
+    const roster = makeRosterRows()
+    await createRosterWithMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      roster,
+      matches: [{ source: 'ocr', rows: [{ umaName: 'uma 2', points: 500 }] }],
+    })
+
+    const slot = (await db.roster.toArray()).find((s) => s.umaName === 'Uma 2')
+    const [entry] = await db.matchEntries.toArray()
+    expect(entry).toMatchObject({ rosterId: slot.id, points: 500 })
+  })
+
+  it('stores nothing when a match row names an uma not on the roster', async () => {
+    await expect(
+      createRosterWithMatches({
+        playedAt: '2026-01-01T00:00:00.000Z',
+        roster: makeRosterRows(),
+        matches: [{ source: 'ocr', rows: [{ umaName: 'Stranger', points: 500 }] }],
+      })
+    ).rejects.toThrow("Stranger isn't on the roster.")
+
+    expect(await db.roster.count()).toBe(0)
+    expect(await db.matches.count()).toBe(0)
+  })
+})
+
+describe('getRosterStats', () => {
+  it('returns every slot with null stats when nothing is logged', async () => {
+    await createRoster(makeRosterRows())
+    const stats = await getRosterStats()
+    expect(stats).toHaveLength(15)
+    expect(stats[0]).toMatchObject({ matchCount: 0, average: null, high: null, low: null, scores: [] })
+  })
+
+  it('computes average, high, low, and newest-first scores per slot', async () => {
+    const [a, b] = await createRoster(makeRosterRows())
+    const [older] = await addMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      matches: [{ entries: [{ rosterId: a, points: 100 }, { rosterId: b, points: 999 }] }],
+    })
+    const [newer] = await addMatches({
+      playedAt: '2026-01-03T00:00:00.000Z',
+      matches: [{ entries: [{ rosterId: a, points: 210 }] }],
+    })
+    const [middle] = await addMatches({
+      playedAt: '2026-01-02T00:00:00.000Z',
+      matches: [{ entries: [{ rosterId: a, points: 200 }] }],
+    })
+
+    const slotA = (await getRosterStats()).find((s) => s.id === a)
+    expect(slotA.matchCount).toBe(3)
+    expect(slotA.average).toBeCloseTo(170, 5)
+    expect(slotA.high).toBe(210)
+    expect(slotA.low).toBe(100)
+    expect(slotA.scores.map((s) => s.matchId)).toEqual([newer, middle, older])
+    expect(slotA.scores[0]).toEqual({ matchId: newer, playedAt: '2026-01-03T00:00:00.000Z', points: 210 })
+  })
+})
+
+describe('findWeakestLink', () => {
+  it('returns the id with the lowest average, ignoring unscored slots', () => {
+    const stats = [
+      { id: 1, average: 50000 },
+      { id: 2, average: null },
+      { id: 3, average: 30000 },
     ]
-    const matchId = await addMatch({ playedAt: '2026-01-01T00:00:00.000Z', rows })
-
-    const match = await db.matches.get(matchId)
-    expect(match.playedAt).toBe('2026-01-01T00:00:00.000Z')
-
-    const entries = await db.matchEntries.where('matchId').equals(matchId).toArray()
-    expect(entries).toHaveLength(2)
-    expect(entries.map((e) => e.umaName).sort()).toEqual(['Silence Suzuka', 'Special Week'])
+    expect(findWeakestLink(stats)).toBe(3)
   })
 
-  it('defaults source to "manual" when omitted', async () => {
-    const matchId = await addMatch({ playedAt: '2026-01-01T00:00:00.000Z', rows: [] })
-    const match = await db.matches.get(matchId)
-    expect(match.source).toBe('manual')
-  })
-
-  it('respects an explicit source', async () => {
-    const matchId = await addMatch({ playedAt: '2026-01-01T00:00:00.000Z', rows: [], source: 'ocr' })
-    const match = await db.matches.get(matchId)
-    expect(match.source).toBe('ocr')
-  })
-
-  it('sets a numeric createdAt', async () => {
-    const matchId = await addMatch({ playedAt: '2026-01-01T00:00:00.000Z', rows: [] })
-    const match = await db.matches.get(matchId)
-    expect(typeof match.createdAt).toBe('number')
+  it('returns null when nothing is scored', () => {
+    expect(findWeakestLink([{ id: 1, average: null }])).toBeNull()
   })
 })
 
-describe('getLatestMatchEntries', () => {
-  it('returns an empty array when there are no matches', async () => {
-    expect(await getLatestMatchEntries()).toEqual([])
-  })
-
-  it('returns the entries for the only match', async () => {
-    const rows = [{ umaName: 'Special Week', distance: 'Medium', points: 80936 }]
-    await addMatch({ playedAt: '2026-01-01T00:00:00.000Z', rows })
-
-    const entries = await getLatestMatchEntries()
-    expect(entries).toHaveLength(1)
-    expect(entries[0]).toMatchObject({ umaName: 'Special Week', distance: 'Medium', points: 80936 })
-  })
-
-  it('returns entries for the match with the greatest playedAt, not the most recently inserted', async () => {
-    // Insert the chronologically later match first, and the earlier one second,
-    // so a bug that used insertion order instead of playedAt would fail this.
-    await addMatch({
-      playedAt: '2026-02-01T00:00:00.000Z',
-      rows: [{ umaName: 'Newer Match Uma', distance: 'Long', points: 1 }],
-    })
-    await addMatch({
+describe('getMatchHistory', () => {
+  it('lists matches newest first with their entry counts', async () => {
+    const [a, b] = await createRoster(makeRosterRows())
+    const [older] = await addMatches({
       playedAt: '2026-01-01T00:00:00.000Z',
-      rows: [{ umaName: 'Older Match Uma', distance: 'Long', points: 1 }],
+      matches: [{ entries: [{ rosterId: a, points: 1 }, { rosterId: b, points: 1 }] }],
+    })
+    const [newer] = await addMatches({
+      playedAt: '2026-01-02T00:00:00.000Z',
+      matches: [{ source: 'ocr', entries: [{ rosterId: a, points: 1 }] }],
     })
 
-    const entries = await getLatestMatchEntries()
-    expect(entries.map((e) => e.umaName)).toEqual(['Newer Match Uma'])
-  })
-})
-
-describe('getRosterSummary', () => {
-  it('returns an empty array when there are no matches', async () => {
-    expect(await getRosterSummary()).toEqual([])
-  })
-
-  it('summarizes a single match with a single uma', async () => {
-    await addMatch({
-      playedAt: '2026-01-01T00:00:00.000Z',
-      rows: [{ umaName: 'Special Week', distance: 'Medium', points: 80936 }],
-    })
-
-    const summary = await getRosterSummary()
-    expect(summary).toEqual([
-      { umaName: 'Special Week', distance: 'Medium', matchCount: 1, average: 80936 },
+    expect(await getMatchHistory()).toEqual([
+      { matchId: newer, playedAt: '2026-01-02T00:00:00.000Z', source: 'ocr', entryCount: 1 },
+      { matchId: older, playedAt: '2026-01-01T00:00:00.000Z', source: 'manual', entryCount: 2 },
     ])
   })
 
-  it('averages points across multiple matches for the same uma', async () => {
-    await addMatch({
+  it('breaks a playedAt tie by newest match id first', async () => {
+    const [a] = await createRoster(makeRosterRows())
+    const [first, second] = await addMatches({
       playedAt: '2026-01-01T00:00:00.000Z',
-      rows: [{ umaName: 'Special Week', distance: 'Medium', points: 100 }],
+      matches: [{ entries: [{ rosterId: a, points: 1 }] }, { entries: [{ rosterId: a, points: 2 }] }],
     })
-    await addMatch({
-      playedAt: '2026-01-02T00:00:00.000Z',
-      rows: [{ umaName: 'Special Week', distance: 'Medium', points: 200 }],
-    })
-    await addMatch({
-      playedAt: '2026-01-03T00:00:00.000Z',
-      rows: [{ umaName: 'Special Week', distance: 'Medium', points: 210 }],
-    })
-
-    const [summary] = await getRosterSummary()
-    expect(summary.matchCount).toBe(3)
-    expect(summary.average).toBeCloseTo(170, 5)
-  })
-
-  it('sorts ascending by average, weakest link first', async () => {
-    await addMatch({
-      playedAt: '2026-01-01T00:00:00.000Z',
-      rows: [
-        { umaName: 'Strong Uma', distance: 'Medium', points: 90000 },
-        { umaName: 'Weak Uma', distance: 'Medium', points: 10000 },
-        { umaName: 'Middle Uma', distance: 'Medium', points: 50000 },
-      ],
-    })
-
-    const summary = await getRosterSummary()
-    expect(summary.map((s) => s.umaName)).toEqual(['Weak Uma', 'Middle Uma', 'Strong Uma'])
-  })
-
-  it('reports the distance from whichever entry was iterated last (current last-write-wins behavior, not a spec)', async () => {
-    // getRosterSummary's accumulator unconditionally overwrites `distance` on
-    // every entry it sees, so the reported distance is whichever match's
-    // entry for this uma was iterated last (insertion order), regardless of
-    // playedAt. This test pins down that actual behavior so a future
-    // intentional fix changes it on purpose rather than by surprise.
-    await addMatch({
-      playedAt: '2026-01-01T00:00:00.000Z',
-      rows: [{ umaName: 'Special Week', distance: 'Sprint', points: 100 }],
-    })
-    await addMatch({
-      playedAt: '2026-01-02T00:00:00.000Z',
-      rows: [{ umaName: 'Special Week', distance: 'Mile', points: 100 }],
-    })
-
-    const [summary] = await getRosterSummary()
-    expect(summary.distance).toBe('Mile')
+    expect((await getMatchHistory()).map((m) => m.matchId)).toEqual([second, first])
   })
 })
 
-describe('deleteUmaHistory', () => {
-  it('deletes only the target uma\'s entries, leaving other umas and matches intact', async () => {
-    const matchId = await addMatch({
+describe('deleteMatch', () => {
+  it('removes the match and only its entries', async () => {
+    const [a] = await createRoster(makeRosterRows())
+    const [keep, remove] = await addMatches({
       playedAt: '2026-01-01T00:00:00.000Z',
-      rows: [
-        { umaName: 'Special Week', distance: 'Medium', points: 100 },
-        { umaName: 'Silence Suzuka', distance: 'Mile', points: 200 },
+      matches: [{ entries: [{ rosterId: a, points: 1 }] }, { entries: [{ rosterId: a, points: 2 }] }],
+    })
+
+    await deleteMatch(remove)
+
+    expect(await db.matches.get(remove)).toBeUndefined()
+    expect(await db.matches.get(keep)).toBeDefined()
+    expect((await db.matchEntries.toArray()).map((e) => e.points)).toEqual([1])
+  })
+})
+
+describe('deleteUmaScores', () => {
+  it("deletes only that slot's entries and keeps the slot and other umas", async () => {
+    const [a, b] = await createRoster(makeRosterRows())
+    const [matchId] = await addMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      matches: [{ entries: [{ rosterId: a, points: 1 }, { rosterId: b, points: 2 }] }],
+    })
+
+    expect(await deleteUmaScores(a)).toBe(1)
+
+    expect(await db.roster.get(a)).toBeDefined()
+    expect(await db.matches.get(matchId)).toBeDefined()
+    expect((await db.matchEntries.toArray()).map((e) => e.rosterId)).toEqual([b])
+  })
+
+  it('removes a match left with no entries', async () => {
+    const [a, b] = await createRoster(makeRosterRows())
+    const [onlyA, both] = await addMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      matches: [
+        { entries: [{ rosterId: a, points: 1 }] },
+        { entries: [{ rosterId: a, points: 2 }, { rosterId: b, points: 3 }] },
       ],
     })
 
-    const deletedCount = await deleteUmaHistory('Special Week')
+    expect(await deleteUmaScores(a)).toBe(2)
 
-    expect(deletedCount).toBe(1)
-    const remaining = await db.matchEntries.where('matchId').equals(matchId).toArray()
-    expect(remaining.map((e) => e.umaName)).toEqual(['Silence Suzuka'])
-    expect(await db.matches.get(matchId)).toBeDefined()
+    expect(await db.matches.get(onlyA)).toBeUndefined()
+    expect(await db.matches.get(both)).toBeDefined()
   })
 
-  it('deletes a uma\'s entries across multiple matches', async () => {
-    await addMatch({
-      playedAt: '2026-01-01T00:00:00.000Z',
-      rows: [{ umaName: 'Special Week', distance: 'Medium', points: 100 }],
-    })
-    await addMatch({
-      playedAt: '2026-01-02T00:00:00.000Z',
-      rows: [{ umaName: 'Special Week', distance: 'Medium', points: 200 }],
-    })
-
-    const deletedCount = await deleteUmaHistory('Special Week')
-
-    expect(deletedCount).toBe(2)
-    expect(await getRosterSummary()).toEqual([])
-  })
-
-  it('resolves to 0 when the uma has no history', async () => {
-    expect(await deleteUmaHistory('Nobody')).toBe(0)
+  it('resolves to 0 when the slot has no scores', async () => {
+    const [a] = await createRoster(makeRosterRows())
+    expect(await deleteUmaScores(a)).toBe(0)
   })
 })

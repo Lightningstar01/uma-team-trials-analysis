@@ -30,6 +30,7 @@ A free, browser-based tool that uses client-side OCR to read **Uma Musume: Prett
 | Game version | Global, English UI | **Decided** (developer) |
 | MVP input | "Score Info" screenshots (2 scrolling screenshots cover all 15 umas per match); the entry form accepts a batch of screenshots for several matches at once, paired up by upload order | **Decided** (developer) |
 | Batch OCR roster fallback | A batch upload's matches are assumed to share one identical 15-uma roster (same names and distances; a distance change counts as replacing that uma). An OCR gap (unresolved name or null distance) in any match is filled using whatever any other match in the same batch already resolved for the same uma, in either direction; conflicting confident reads warn instead of guessing | **Decided** (developer) — see `docs/decisions.md` |
+| Roster | Stored and set by the player (typed in, or auto-filled from the first screenshot batch). Scores belong to a roster slot; deleting an uma's scores keeps its slot, and only an empty slot can be renamed or moved to another distance. Match entry fills points for the 15 roster slots | **Decided** (developer) — see `docs/decisions.md` |
 | MVP calculation | Compare averages across all 15 umas using raw Gained Scores, with no adjustments (**Simple Mode** only) | **Decided** (developer) |
 | Advanced Mode (Phase 2) | Ranks umas by `S = I + T` (the uma's own score plus the score its Rating adds to the team), after removing Ace, Support, and Opponent Rating effects from each match's score. The player enters Support rate and Team Rating once and keeps them current, each match snapshots them, and Aces are flagged per match; assumes the player always picks the Top Option | **Decided** (developer) — see `docs/roadmap.md` and `docs/decisions.md` |
 | Opponent rating estimate (Advanced Mode) | Empirical curve of the Top Option's opponent rating multiplier vs. the player's Team Rating, fitted from developer-collected samples (not from Team Rank floors); assumed to continue beyond the sampled ratings, with a site disclaimer | **Decided** (developer) — see `docs/team-trials-reference.md` |
@@ -70,10 +71,12 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
 ├── vitest.config.js                 # Vitest config (node environment, src/**/*.test.js, fake-indexeddb setup, coverage-v8 report-only)
 └── src/                             # React + Vite app
     ├── db/
-    │   ├── db.js                    # Dexie instance + schema
-    │   ├── constants.js             # Distance category enum
-    │   ├── matches.js               # Data-access layer: add/query/delete matches and umas
-    │   └── matches.test.js          # Unit tests against fake-indexeddb: addMatch/getLatestMatchEntries/getRosterSummary/deleteUmaHistory
+    │   ├── db.js                    # Dexie instance + schema (v2: roster table; entries keyed by rosterId)
+    │   ├── constants.js             # Distance category enum, ROSTER_SIZE
+    │   ├── roster.js                # Stored 15-slot roster: get/create/validate, edit a slot (only once its scores are deleted), reset everything
+    │   ├── roster.test.js           # Unit tests against fake-indexeddb for roster.js
+    │   ├── matches.js               # Matches: add (optionally creating the roster), per-slot stats, weakest link, match history, delete match, delete one uma's scores
+    │   └── matches.test.js          # Unit tests against fake-indexeddb for matches.js
     ├── ocr/
     │   ├── imageValidation.js       # Light upload validation (file type, size cap)
     │   ├── imageValidation.test.js  # Unit tests for the type/size validation rules
@@ -84,11 +87,19 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
     │   ├── parseScoreInfo.test.js   # Parsing/merge/validation unit tests (synthetic bbox fixtures, no Tesseract needed)
     │   ├── umaNames.js              # Known playable uma names (developer-supplied); exact lookup (lookupUmaName) for the split-row noise gate, closest-match correction (resolveUmaName/closestUmaName) for a confirmed row's name
     │   ├── umaNames.test.js         # Unit tests for exact lookup and closest-match correction
+    │   ├── readScoreInfoBatch.js    # Upload pipeline: validate files, pair by upload order, OCR + merge each match, batch roster fallback
+    │   ├── readScoreInfoBatch.test.js  # Unit tests against a mocked tesseractClient
+    │   ├── matchToRoster.js         # Lines up one match's OCR rows with the stored roster by name (mapOcrRowsToRoster)
+    │   ├── matchToRoster.test.js    # Unit tests for the roster mapping and its warnings
     │   └── __fixtures__/            # Real Score Info screenshots for OCR dev/testing, plus sampleMatch.js (15-row reference data)
     ├── components/
-    │   ├── RosterDashboard.jsx      # Per-uma averages, weakest-link recommendation, delete-uma
-    │   ├── MatchEntryForm.jsx       # Match entry: manual typing, or upload Score Info screenshots (one or more matches per batch) to auto-fill via OCR, filling batch-wide OCR gaps via the roster fallback
-    │   └── OcrDebugPanel.jsx        # Dev-only (DEV build) raw-OCR-text diagnostic tool
+    │   ├── RosterSetup.jsx          # First-run screen: fill the roster manually, or auto-fill it from the first screenshot batch
+    │   ├── RosterDashboard.jsx      # Roster table: sortable avg/high/low/matches per uma, expandable score list, weakest link, delete scores, edit an empty slot, reset roster
+    │   ├── rosterSort.js            # Pure column-sort helpers for the roster table (sortRosterStats, nextSort)
+    │   ├── rosterSort.test.js       # Unit tests for the sort helpers (pure logic, not a React component test)
+    │   ├── MatchHistory.jsx         # Collapsible list of logged matches with delete-match (undo)
+    │   ├── MatchEntryModal.jsx      # <dialog> for logging matches (manual or screenshots), one page per match; points-only rows once a roster exists
+    │   └── format.js                # Shared number/date display helpers
     ├── App.jsx
     └── main.jsx
 ```
