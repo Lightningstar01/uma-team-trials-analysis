@@ -1,4 +1,4 @@
-import { db } from './db'
+import { db, isActive } from './db'
 import { DISTANCES, DISTANCE_ORDER, ROSTER_SIZE } from './constants'
 
 function normalizeName(name) {
@@ -71,15 +71,15 @@ export async function resetRoster() {
 }
 
 // A slot can only be renamed or moved to another distance once its scores
-// are deleted, so a slot's history always belongs to the name and distance
-// it shows. Swapping two umas' distances means deleting both first.
+// are deleted, so a slot's active history always belongs to the name and
+// distance it shows (deleted entries carry their own snapshot). Swapping two umas' distances means deleting both first.
 export async function updateRosterSlot(id, { umaName, distance }) {
   const name = umaName.trim()
   if (name === '') throw new Error('Uma name is required.')
   if (!DISTANCES.has(distance)) throw new Error(`"${distance}" is not a distance category.`)
 
   return db.transaction('rw', db.roster, db.matchEntries, async () => {
-    const scoreCount = await db.matchEntries.where('rosterId').equals(id).count()
+    const scoreCount = await db.matchEntries.where('rosterId').equals(id).filter(isActive).count()
     if (scoreCount > 0) throw new Error("Delete this uma's scores before editing it.")
 
     const slots = await db.roster.toArray()

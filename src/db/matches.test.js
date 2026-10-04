@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   addMatches,
   createRosterWithMatches,
+  deleteAllMatches,
   deleteMatch,
+  deleteOutOfDateMatches,
   deleteUmaScores,
   findWeakestLink,
   getMatchHistory,
@@ -10,7 +12,7 @@ import {
   getRosterStats,
   matchKey,
 } from './matches.js'
-import { createRoster } from './roster.js'
+import { createRoster, updateRosterSlot } from './roster.js'
 import { db } from './db.js'
 import { DISTANCE_ORDER } from './constants.js'
 
@@ -20,6 +22,11 @@ function makeRosterRows() {
     umaName: `Uma ${i + 1}`,
     distance: DISTANCE_ORDER[Math.floor(i / 3)],
   }))
+}
+
+// A full match: one entry per slot, Uma 1 scoring 100, Uma 2 200, and so on.
+function fullMatchEntries(slotIds) {
+  return slotIds.map((rosterId, i) => ({ rosterId, points: (i + 1) * 100 }))
 }
 
 beforeEach(async () => {
@@ -113,6 +120,19 @@ describe('getRosterStats', () => {
     expect(slotA.scores.map((s) => s.matchId)).toEqual([newer, middle, older])
     expect(slotA.scores[0]).toEqual({ matchId: newer, playedAt: '2026-01-03T00:00:00.000Z', points: 210 })
   })
+
+  it('leaves out deleted scores', async () => {
+    const [a, b] = await createRoster(makeRosterRows())
+    await addMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      matches: [{ entries: [{ rosterId: a, points: 100 }, { rosterId: b, points: 200 }] }],
+    })
+    await deleteUmaScores(a)
+
+    const stats = await getRosterStats()
+    expect(stats.find((s) => s.id === a)).toMatchObject({ matchCount: 0, average: null, scores: [] })
+    expect(stats.find((s) => s.id === b)).toMatchObject({ matchCount: 1, average: 200 })
+  })
 })
 
 describe('findWeakestLink', () => {
@@ -131,21 +151,58 @@ describe('findWeakestLink', () => {
 })
 
 describe('getMatchHistory', () => {
-  it('lists matches newest first with their entry counts', async () => {
-    const [a, b] = await createRoster(makeRosterRows())
+  it('lists matches newest first', async () => {
+    const ids = await createRoster(makeRosterRows())
     const [older] = await addMatches({
       playedAt: '2026-01-01T00:00:00.000Z',
-      matches: [{ entries: [{ rosterId: a, points: 1 }, { rosterId: b, points: 1 }] }],
+      matches: [{ entries: fullMatchEntries(ids) }],
     })
     const [newer] = await addMatches({
       playedAt: '2026-01-02T00:00:00.000Z',
-      matches: [{ source: 'ocr', entries: [{ rosterId: a, points: 1 }] }],
+      matches: [{ source: 'ocr', entries: fullMatchEntries(ids) }],
     })
 
-    expect(await getMatchHistory()).toEqual([
-      { matchId: newer, playedAt: '2026-01-02T00:00:00.000Z', source: 'ocr', entryCount: 1 },
-      { matchId: older, playedAt: '2026-01-01T00:00:00.000Z', source: 'manual', entryCount: 2 },
+    expect(await getMatchHistory()).toMatchObject([
+      { matchId: newer, playedAt: '2026-01-02T00:00:00.000Z', source: 'ocr', deletedCount: 0, missingCount: 0 },
+      { matchId: older, playedAt: '2026-01-01T00:00:00.000Z', source: 'manual', deletedCount: 0, missingCount: 0 },
     ])
+  })
+
+  it("shows each entry's current name and distance, highest points first", async () => {
+    const ids = await createRoster(makeRosterRows())
+    await addMatches({ playedAt: '2026-01-01T00:00:00.000Z', matches: [{ entries: fullMatchEntries(ids) }] })
+
+    const [match] = await getMatchHistory()
+    expect(match.entries).toHaveLength(15)
+    expect(match.entries[0]).toMatchObject({ umaName: 'Uma 15', distance: 'Dirt', points: 1500, deleted: false })
+    expect(match.entries[14]).toMatchObject({ umaName: 'Uma 1', distance: 'Sprint', points: 100, deleted: false })
+  })
+
+  it("keeps a deleted uma's snapshot after its slot is edited, and counts it as deleted", async () => {
+    const ids = await createRoster(makeRosterRows())
+    await addMatches({ playedAt: '2026-01-01T00:00:00.000Z', matches: [{ entries: fullMatchEntries(ids) }] })
+    await deleteUmaScores(ids[0])
+    await updateRosterSlot(ids[0], { umaName: 'New Uma', distance: 'Long' })
+
+    const [match] = await getMatchHistory()
+    expect(match.deletedCount).toBe(1)
+    expect(match.missingCount).toBe(0)
+    expect(match.entries.find((e) => e.points === 100)).toMatchObject({
+      umaName: 'Uma 1',
+      distance: 'Sprint',
+      deleted: true,
+    })
+  })
+
+  it('counts entries missing from a match as deleted', async () => {
+    const ids = await createRoster(makeRosterRows())
+    await addMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      matches: [{ entries: fullMatchEntries(ids).slice(1) }],
+    })
+
+    const [match] = await getMatchHistory()
+    expect(match).toMatchObject({ missingCount: 1, deletedCount: 1 })
   })
 
   it('breaks a playedAt tie by newest match id first', async () => {
@@ -223,8 +280,59 @@ describe('deleteMatch', () => {
   })
 })
 
+describe('deleteAllMatches', () => {
+  it('removes every match and score but keeps the roster', async () => {
+    const ids = await createRoster(makeRosterRows())
+    await addMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      matches: [{ entries: fullMatchEntries(ids) }, { entries: fullMatchEntries(ids) }],
+    })
+
+    await deleteAllMatches()
+
+    expect(await db.matches.count()).toBe(0)
+    expect(await db.matchEntries.count()).toBe(0)
+    expect(await db.roster.get(ids[0])).toMatchObject({ umaName: 'Uma 1', distance: 'Sprint' })
+    expect(await db.roster.count()).toBe(15)
+  })
+})
+
+describe('deleteOutOfDateMatches', () => {
+  it('deletes matches with a deleted or missing uma, and keeps up-to-date ones', async () => {
+    const ids = await createRoster(makeRosterRows())
+    const [withDeleted, upToDate, withMissing] = await addMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      matches: [
+        { entries: fullMatchEntries(ids) },
+        { entries: fullMatchEntries(ids) },
+        { entries: fullMatchEntries(ids).slice(1) },
+      ],
+    })
+    // Marks Uma 1 deleted in the first match only, so the second stays up to date.
+    await db.matchEntries
+      .where('matchId')
+      .equals(withDeleted)
+      .filter((e) => e.rosterId === ids[0])
+      .modify({ deleted: { umaName: 'Uma 1', distance: 'Sprint' } })
+
+    expect(await deleteOutOfDateMatches()).toBe(2)
+
+    expect((await db.matches.toArray()).map((m) => m.id)).toEqual([upToDate])
+    expect(await db.matchEntries.where('matchId').anyOf([withDeleted, withMissing]).count()).toBe(0)
+    expect(await db.matchEntries.where('matchId').equals(upToDate).count()).toBe(15)
+  })
+
+  it('resolves to 0 when every match is up to date', async () => {
+    const ids = await createRoster(makeRosterRows())
+    await addMatches({ playedAt: '2026-01-01T00:00:00.000Z', matches: [{ entries: fullMatchEntries(ids) }] })
+
+    expect(await deleteOutOfDateMatches()).toBe(0)
+    expect(await db.matches.count()).toBe(1)
+  })
+})
+
 describe('deleteUmaScores', () => {
-  it("deletes only that slot's entries and keeps the slot and other umas", async () => {
+  it("marks only that slot's entries deleted with a snapshot, keeping the slot and match", async () => {
     const [a, b] = await createRoster(makeRosterRows())
     const [matchId] = await addMatches({
       playedAt: '2026-01-01T00:00:00.000Z',
@@ -235,10 +343,26 @@ describe('deleteUmaScores', () => {
 
     expect(await db.roster.get(a)).toBeDefined()
     expect(await db.matches.get(matchId)).toBeDefined()
-    expect((await db.matchEntries.toArray()).map((e) => e.rosterId)).toEqual([b])
+    const entries = await db.matchEntries.toArray()
+    expect(entries.find((e) => e.rosterId === a).deleted).toEqual({ umaName: 'Uma 1', distance: 'Sprint' })
+    expect(entries.find((e) => e.rosterId === b).deleted).toBeUndefined()
   })
 
-  it('removes a match left with no entries', async () => {
+  it('does not re-mark entries that are already deleted', async () => {
+    const [a, b] = await createRoster(makeRosterRows())
+    await addMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      matches: [{ entries: [{ rosterId: a, points: 1 }, { rosterId: b, points: 2 }] }],
+    })
+    await deleteUmaScores(a)
+    await updateRosterSlot(a, { umaName: 'New Uma', distance: 'Long' })
+
+    expect(await deleteUmaScores(a)).toBe(0)
+    const entry = (await db.matchEntries.toArray()).find((e) => e.rosterId === a)
+    expect(entry.deleted).toEqual({ umaName: 'Uma 1', distance: 'Sprint' })
+  })
+
+  it('removes a match, and all of its entries, once it has no active entries left', async () => {
     const [a, b] = await createRoster(makeRosterRows())
     const [onlyA, both] = await addMatches({
       playedAt: '2026-01-01T00:00:00.000Z',
@@ -251,7 +375,12 @@ describe('deleteUmaScores', () => {
     expect(await deleteUmaScores(a)).toBe(2)
 
     expect(await db.matches.get(onlyA)).toBeUndefined()
+    expect(await db.matchEntries.where('matchId').equals(onlyA).count()).toBe(0)
     expect(await db.matches.get(both)).toBeDefined()
+
+    await deleteUmaScores(b)
+    expect(await db.matches.get(both)).toBeUndefined()
+    expect(await db.matchEntries.count()).toBe(0)
   })
 
   it('resolves to 0 when the slot has no scores', async () => {

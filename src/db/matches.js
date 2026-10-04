@@ -1,4 +1,5 @@
-import { db } from './db'
+import { db, isActive } from './db'
+import { ROSTER_SIZE } from './constants'
 import { createRoster, getRoster } from './roster'
 
 function normalizeName(name) {
@@ -48,8 +49,19 @@ function newestFirst(a, b) {
   return b.playedAt.localeCompare(a.playedAt) || b.matchId - a.matchId
 }
 
+function groupByMatch(entries) {
+  const entriesByMatch = new Map()
+  for (const entry of entries) {
+    const matchEntries = entriesByMatch.get(entry.matchId) ?? []
+    matchEntries.push(entry)
+    entriesByMatch.set(entry.matchId, matchEntries)
+  }
+  return entriesByMatch
+}
+
 // One item per roster slot (roster order), with that slot's scores newest
-// first. Stats are null for a slot with no scores yet.
+// first. Stats are null for a slot with no scores yet. Deleted entries
+// don't count.
 export async function getRosterStats() {
   const [roster, matches, entries] = await Promise.all([
     getRoster(),
@@ -59,7 +71,7 @@ export async function getRosterStats() {
 
   const playedAtByMatch = new Map(matches.map((match) => [match.id, match.playedAt]))
   const scoresBySlot = new Map()
-  for (const entry of entries) {
+  for (const entry of entries.filter(isActive)) {
     const scores = scoresBySlot.get(entry.rosterId) ?? []
     scores.push({
       matchId: entry.matchId,
@@ -95,24 +107,40 @@ export function findWeakestLink(stats) {
   return weakest?.id ?? null
 }
 
+// Every logged match, newest first, with its entries highest points first.
+// An active entry shows its slot's current name and distance; a deleted one
+// shows the snapshot taken when it was deleted. `missingCount` counts
+// entries hard-deleted before deletes kept a snapshot (no details left).
+// A match with any deleted or missing uma is out of date with the roster.
 export async function getMatchHistory() {
-  const [matches, entries] = await Promise.all([
+  const [roster, matches, entries] = await Promise.all([
+    db.roster.toArray(),
     db.matches.toArray(),
     db.matchEntries.toArray(),
   ])
 
-  const countByMatch = new Map()
-  for (const entry of entries) {
-    countByMatch.set(entry.matchId, (countByMatch.get(entry.matchId) ?? 0) + 1)
-  }
+  const slotById = new Map(roster.map((slot) => [slot.id, slot]))
+  const entriesByMatch = groupByMatch(entries)
 
   return matches
-    .map((match) => ({
-      matchId: match.id,
-      playedAt: match.playedAt,
-      source: match.source,
-      entryCount: countByMatch.get(match.id) ?? 0,
-    }))
+    .map((match) => {
+      const matchEntries = (entriesByMatch.get(match.id) ?? [])
+        .map((entry) => {
+          const { umaName, distance } = entry.deleted ?? slotById.get(entry.rosterId)
+          return { entryId: entry.id, umaName, distance, points: entry.points, deleted: !isActive(entry) }
+        })
+        .sort((a, b) => b.points - a.points)
+      const missingCount = Math.max(0, ROSTER_SIZE - matchEntries.length)
+
+      return {
+        matchId: match.id,
+        playedAt: match.playedAt,
+        source: match.source,
+        entries: matchEntries,
+        missingCount,
+        deletedCount: matchEntries.filter((entry) => entry.deleted).length + missingCount,
+      }
+    })
     .sort(newestFirst)
 }
 
@@ -125,27 +153,51 @@ export function matchKey(entries) {
     .join(',')
 }
 
-// Every logged match's matchKey, mapped to that match's playedAt, so a new
-// match can be checked against history before saving.
+// Every logged match's matchKey (active entries only), mapped to that
+// match's playedAt, so a new match can be checked against history before
+// saving.
 export async function getMatchKeys() {
   const [matches, entries] = await Promise.all([
     db.matches.toArray(),
     db.matchEntries.toArray(),
   ])
 
-  const entriesByMatch = new Map()
-  for (const entry of entries) {
-    const matchEntries = entriesByMatch.get(entry.matchId) ?? []
-    matchEntries.push(entry)
-    entriesByMatch.set(entry.matchId, matchEntries)
-  }
-
+  const entriesByMatch = groupByMatch(entries.filter(isActive))
   const keys = new Map()
   for (const match of matches) {
     const key = matchKey(entriesByMatch.get(match.id) ?? [])
     if (!keys.has(key)) keys.set(key, match.playedAt)
   }
   return keys
+}
+
+// Same rule as getMatchHistory's deletedCount > 0.
+function isOutOfDate(matchEntries) {
+  return matchEntries.length < ROSTER_SIZE || !matchEntries.every(isActive)
+}
+
+// Deletes every match that's out of date with the roster (any deleted or
+// missing uma). Resolves to the number of matches deleted.
+export async function deleteOutOfDateMatches() {
+  return db.transaction('rw', db.matches, db.matchEntries, async () => {
+    const [matches, entries] = await Promise.all([db.matches.toArray(), db.matchEntries.toArray()])
+    const entriesByMatch = groupByMatch(entries)
+    const matchIds = matches
+      .filter((match) => isOutOfDate(entriesByMatch.get(match.id) ?? []))
+      .map((match) => match.id)
+
+    await db.matchEntries.where('matchId').anyOf(matchIds).delete()
+    await db.matches.bulkDelete(matchIds)
+    return matchIds.length
+  })
+}
+
+// Deletes every match and score but keeps the roster's umas and distances.
+export async function deleteAllMatches() {
+  return db.transaction('rw', db.matches, db.matchEntries, async () => {
+    await db.matchEntries.clear()
+    await db.matches.clear()
+  })
 }
 
 export async function deleteMatch(matchId) {
@@ -155,17 +207,23 @@ export async function deleteMatch(matchId) {
   })
 }
 
-// Deletes one slot's scores (the slot itself stays). A match left with no
-// scores at all is removed too, so it doesn't linger as an empty row in
+// Deletes one slot's scores (the slot itself stays). The entries are marked
+// deleted with a snapshot of the slot, so their matches can still show them
+// struck through after the slot is edited. A match left with no active
+// scores is removed entirely, so it doesn't linger as an all-deleted row in
 // the match history. Resolves to the number of scores deleted.
 export async function deleteUmaScores(rosterId) {
-  return db.transaction('rw', db.matches, db.matchEntries, async () => {
-    const entries = await db.matchEntries.where('rosterId').equals(rosterId).toArray()
-    await db.matchEntries.bulkDelete(entries.map((entry) => entry.id))
+  return db.transaction('rw', db.roster, db.matches, db.matchEntries, async () => {
+    const activeEntries = () => db.matchEntries.where('rosterId').equals(rosterId).filter(isActive)
+    const entries = await activeEntries().toArray()
+    if (entries.length === 0) return 0
+
+    const { umaName, distance } = await db.roster.get(rosterId)
+    await activeEntries().modify({ deleted: { umaName, distance } })
 
     for (const matchId of new Set(entries.map((entry) => entry.matchId))) {
-      const remaining = await db.matchEntries.where('matchId').equals(matchId).count()
-      if (remaining === 0) await db.matches.delete(matchId)
+      const remaining = await db.matchEntries.where('matchId').equals(matchId).filter(isActive).count()
+      if (remaining === 0) await deleteMatch(matchId)
     }
 
     return entries.length

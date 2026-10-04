@@ -35,9 +35,9 @@ A free, browser-based tool that uses client-side OCR to read **Uma Musume: Prett
 | Advanced Mode (Phase 2) | Ranks umas by `S = I + T` (the uma's own score plus the score its Rating adds to the team), after removing Ace, Support, and Opponent Rating effects from each match's score. The player enters Support rate and Team Rating once and keeps them current, each match snapshots them, and Aces are flagged per match; assumes the player always picks the Top Option | **Decided** (developer) — see `docs/roadmap.md` and `docs/decisions.md` |
 | Opponent rating estimate (Advanced Mode) | Empirical curve of the Top Option's opponent rating multiplier vs. the player's Team Rating, fitted from developer-collected samples (not from Team Rank floors); assumed to continue beyond the sampled ratings, with a site disclaimer | **Decided** (developer) — see `docs/team-trials-reference.md` |
 | Team Bonus | Left out of all calculations (it appears only on Score Details, not Score Info; the match's total score is also on Race History, which the app doesn't use currently); the site carries a disclaimer | **Decided** (developer) |
-| Rolling average | Over all history; a replaced uma is deleted in the app, nulling its existing data | **Decided** (developer) |
+| Rolling average | Over all history; a replaced uma is deleted in the app, so its existing scores stop counting (kept only as struck-through rows in Match history) | **Decided** (developer) |
 | Ace detection (Advanced Mode, Phase 2) | Parse the Edit Team screenshot (manual entry stays an option); needs a database of potential umas, to be provided by the developer | **Decided** (developer) |
-| Upgrading an uma | Same as replacing it: delete it in the app, nulling its existing history | **Decided** (developer) |
+| Upgrading an uma | Same as replacing it: delete it in the app, so its existing scores stop counting | **Decided** (developer) |
 | Ace flag scope (Advanced Mode, Phase 2) | Per-match; a recorded match keeps the Ace flag it had at the time, even after Aces change later | **Decided** (developer) |
 | App type | Static frontend, no backend; the host does zero data processing | Proposed |
 | OCR | Tesseract.js, running locally in the browser (no cloud OCR APIs) | Proposed |
@@ -71,11 +71,11 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
 ├── vitest.config.js                 # Vitest config (node environment, src/**/*.test.js, fake-indexeddb setup, coverage-v8 report-only)
 └── src/                             # React + Vite app
     ├── db/
-    │   ├── db.js                    # Dexie instance + schema (v2: roster table; entries keyed by rosterId)
+    │   ├── db.js                    # Dexie instance + schema (v2: roster table; entries keyed by rosterId) + isActive (skips deleted entries)
     │   ├── constants.js             # Distance category enum, ROSTER_SIZE
     │   ├── roster.js                # Stored 15-slot roster: get/create/validate, edit a slot (only once its scores are deleted), reset everything
     │   ├── roster.test.js           # Unit tests against fake-indexeddb for roster.js
-    │   ├── matches.js               # Matches: add (optionally creating the roster), per-slot stats, weakest link, match history, duplicate-match keys, delete match, delete one uma's scores
+    │   ├── matches.js               # Matches: add (optionally creating the roster), per-slot stats, weakest link, match history (per-match entries, deleted/out-of-date counts), duplicate-match keys, delete match, delete all out-of-date matches, delete all matches (roster kept), delete one uma's scores (marked deleted with a name/distance snapshot)
     │   └── matches.test.js          # Unit tests against fake-indexeddb for matches.js
     ├── ocr/
     │   ├── imageValidation.js       # Light upload validation (file type, size cap)
@@ -97,7 +97,8 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
     │   ├── RosterDashboard.jsx      # Roster table: sortable avg/high/low/matches per uma, expandable score list, weakest link, delete scores, edit an empty slot, reset roster
     │   ├── rosterSort.js            # Pure sort helpers: roster table columns (sortRosterStats, nextSort), entry-grid rows by points (sortEntryRowsByPoints)
     │   ├── rosterSort.test.js       # Unit tests for the sort helpers (pure logic, not a React component test)
-    │   ├── MatchHistory.jsx         # Collapsible list of logged matches with delete-match (undo)
+    │   ├── MatchHistory.jsx         # Collapsible list of logged matches; each expands to its umas/points (deleted umas struck through), flags out-of-date matches, delete-match (undo), delete all out-of-date matches, delete all matches
+    │   ├── keepInPlace.js           # Keeps a toggled element at the same screen position (bottom spacer stops scroll clamping on collapse)
     │   ├── MatchEntryModal.jsx      # <dialog> for logging matches (manual or screenshots), one page per match; points-only rows once a roster exists; warns (with an exclude option) when a match duplicates a logged one
     │   └── format.js                # Shared number/date display helpers
     ├── App.jsx

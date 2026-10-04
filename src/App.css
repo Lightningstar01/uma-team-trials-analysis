@@ -370,6 +370,15 @@ tr.weakest-link:hover {
   list-style: none;
 }
 
+.match-history .summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+  align-self: center;
+}
+
 .match-history summary::-webkit-details-marker {
   display: none;
 }
@@ -394,17 +403,67 @@ tr.weakest-link:hover {
   list-style: none;
 }
 
-.history-list li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 16px;
+.history-list > li {
   padding: 8px 0;
   border-bottom: 1px solid var(--border);
 }
 
-.history-list li .btn {
+.history-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 12px;
   margin-left: auto;
+}
+
+.warning-text {
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.badge-muted {
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid currentColor;
+}
+
+.history-detail {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.history-detail .score-list li {
+  gap: 2px;
+  align-items: flex-start;
+}
+
+.history-detail .uma-name {
+  color: var(--text-h);
+  font-weight: 500;
+}
+
+.history-detail .score-list li.deleted {
+  opacity: 0.7;
+}
+
+.history-detail .score-list li.deleted .uma-name,
+.history-detail .score-list li.deleted strong {
+  text-decoration: line-through;
+}
+
+.history-detail p {
+  margin: 8px 0 0;
 }
 
 /* ---------- modal ---------- */

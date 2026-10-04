@@ -20,3 +20,11 @@ db.version(2)
     await tx.table('matchEntries').clear()
     await tx.table('matches').clear()
   })
+
+// A deleted uma's entries stay in their match, marked with a snapshot of the
+// slot they belonged to (`deleted: { umaName, distance }`), so match history
+// can still show them after the slot is edited. They never count toward
+// stats. Unindexed, so no schema version bump: filter in JS.
+export function isActive(entry) {
+  return !entry.deleted
+}

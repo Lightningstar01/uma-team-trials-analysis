@@ -28,8 +28,9 @@ function RosterDashboard() {
 
   const handleDeleteScores = async (slot) => {
     const confirmed = window.confirm(
-      `Delete all ${slot.matchCount} scores for ${slot.umaName}? The roster slot stays, so you can ` +
-        "edit it afterwards. This can't be undone."
+      `Delete all ${slot.matchCount} scores for ${slot.umaName}? They'll stop counting toward stats, ` +
+        'and their matches will show them struck through and marked out of date in Match history. ' +
+        "The roster slot stays, so you can edit it afterwards. This can't be undone."
     )
     if (!confirmed) return
     await deleteUmaScores(slot.id)

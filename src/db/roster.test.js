@@ -7,7 +7,7 @@ import {
   updateRosterSlot,
   validateRoster,
 } from './roster.js'
-import { addMatches } from './matches.js'
+import { addMatches, deleteUmaScores } from './matches.js'
 import { db } from './db.js'
 import { DISTANCE_ORDER } from './constants.js'
 
@@ -128,6 +128,18 @@ describe('updateRosterSlot', () => {
       'scores'
     )
     expect(await db.roster.get(id)).toMatchObject({ umaName: 'Uma 1' })
+  })
+
+  it('edits a slot once its scores are deleted', async () => {
+    const [id, other] = await createRoster(makeRosterRows())
+    await addMatches({
+      playedAt: '2026-01-01T00:00:00.000Z',
+      matches: [{ entries: [{ rosterId: id, points: 40000 }, { rosterId: other, points: 30000 }] }],
+    })
+    await deleteUmaScores(id)
+
+    await updateRosterSlot(id, { umaName: 'New Uma', distance: 'Long' })
+    expect(await db.roster.get(id)).toMatchObject({ umaName: 'New Uma', distance: 'Long' })
   })
 
   it('refuses a name already used by another slot', async () => {
