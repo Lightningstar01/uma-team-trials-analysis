@@ -18,6 +18,7 @@ Feature timeline for the Uma Team Trials Score Auditor. Items tagged **[Develope
 - [x] **Export/Import backup [Developer]** as a `.json` file, from a Backup card or the first-run setup screen.
 - [x] **Request persistent storage [Developer]** via `navigator.storage.persist()`.
 - [x] **Site disclaimer [Developer]:** footer noting the Team Bonus is excluded and data lives only in this browser.
+- [x] **Hosting [Developer]:** GitHub Pages, auto-deployed on push to `main`.
 
 ## Phase 2: Advanced Mode — rank and opponent rating [Developer: a later phase]
 

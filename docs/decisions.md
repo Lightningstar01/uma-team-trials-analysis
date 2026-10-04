@@ -79,6 +79,11 @@ Holds only (1) decisions and rationale not already stated as current state in `C
 
 - **Footer disclaimer [Developer]:** scores are Score Info Gained Scores and exclude the Team Bonus; data stays in this browser (screenshots never leave the device), so export a backup. Phase 2 disclaimers (opponent curve, aptitude) are added with Advanced Mode.
 
+### Hosting
+
+- **GitHub Pages [Developer]:** free, and it uses the existing public repo and Actions CI, so no extra account is needed. The site is static: no server, secrets, or accounts, and each visitor's data stays in their own browser.
+- The deploy workflow runs lint and tests before building, so a failing change never goes live.
+
 ### Testing strategy
 
 - Dexie code is tested against `fake-indexeddb` rather than a hand-rolled mock, so real queries run.
@@ -98,7 +103,6 @@ Holds only (1) decisions and rationale not already stated as current state in `C
 - How umas are identified from Edit Team/Race Results portraits (matching method against the uma database).
 - How Advanced Mode treats MVP-logged matches, which carry no Ace flags or Team Rating/Support rate snapshots.
 - The G rank's floor (0) had a footnote marker with no footnote text; double-check if a G-ranked uma ever needs to be told apart from Rating 0.
-- Hosting platform: GitHub Pages, Vercel, or Netlify.
 - Whether to self-host Tesseract.js's worker/wasm/lang-data (e.g. under `public/`) instead of its jsDelivr CDN default (deferred hardening).
 
 ## Template for new entries

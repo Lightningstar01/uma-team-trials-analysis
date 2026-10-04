@@ -17,7 +17,7 @@ Why it's new: existing community tools (UmaTools, Umalator) cover support card t
 
 ## Status
 
-MVP (Simple Mode) is complete: roster setup (manual, auto-fill, or from a backup), screenshot/manual match entry, per-uma stats and weakest link, match history, Export/Import backup, persistent storage request, and the footer disclaimer. Next: hosting (undecided), then Phase 2 (Advanced Mode). See `docs/roadmap.md`. Docs began from an AI blueprint conversation plus the developer's screenshots; the scoring/Advanced Mode math was worked out with the developer.
+MVP (Simple Mode) is complete: roster setup (manual, auto-fill, or from a backup), screenshot/manual match entry, per-uma stats and weakest link, match history, Export/Import backup, persistent storage request, and the footer disclaimer. Hosted on GitHub Pages at https://lightningstar01.github.io/uma-team-trials-analysis/ (auto-deployed on push to `main`). Next: Phase 2 (Advanced Mode). See `docs/roadmap.md`. Docs began from an AI blueprint conversation plus the developer's screenshots; the scoring/Advanced Mode math was worked out with the developer.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ MVP (Simple Mode) is complete: roster setup (manual, auto-fill, or from a backup
 | Ace detection (Phase 2) | Parse the Edit Team screenshot (manual entry stays an option); needs a developer-provided database of potential umas | **Decided** |
 | Backup | Export/Import full history as `.json`; import replaces everything, all or nothing | **Built** |
 | Storage protection | `navigator.storage.persist()`, requested once a roster exists | **Built** |
-| Hosting | GitHub Pages, Vercel, or Netlify (all free) | Undecided |
+| Hosting | GitHub Pages, deployed by GitHub Actions on push to `main` (lint + test gate the deploy); Vite `base` is the repo subpath | **Built** |
 
 Constraints: images are processed locally and discarded; only numbers are stored (blueprint estimate ~1–2 KB/match, ~15–20 MB per 10,000 matches). Data lives only in the browser, so backup/restore is first-class. Rationale and the full decision log: `docs/decisions.md`.
 
@@ -52,6 +52,8 @@ Constraints: images are processed locally and discarded; only numbers are stored
 │   ├── roadmap.md                   # MVP scope, later phases, parking lot
 │   └── decisions.md                 # Decision rationale + all open questions
 ├── .github/workflows/test.yml       # CI: lint + test on push to main / any PR
+├── .github/workflows/deploy.yml     # Lint, test, build, publish dist/ to GitHub Pages on push to main
+├── vite.config.js                   # base: '/uma-team-trials-analysis/' (GitHub Pages subpath)
 ├── vitest.config.js                 # node env, src/**/*.test.js, fake-indexeddb setup, v8 coverage (report-only)
 └── src/
     ├── db/
