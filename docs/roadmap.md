@@ -1,21 +1,22 @@
 # Roadmap
 
-Feature timeline for the Uma Team Trials Score Auditor. Items tagged **[Developer]** were stated by the developer; items tagged **[Blueprint]** come from the initial blueprint and are not yet confirmed.
+Feature timeline for the Uma Team Trials Score Auditor. Items tagged **[Developer]** were stated by the developer.
 
 ## Phase 1: MVP (Simple Mode only)
 
-- [x] **Screenshot input [Developer]:** the user provides the two "Score Info" screenshots for a match (a scrolling list; two screenshots cover all 15 umas).
-- [x] **OCR extraction [Blueprint: Tesseract.js, client-side]:** read each row's uma name, points, and distance from the screenshots, ignoring the epithet banners.
+- [x] **Screenshot input [Developer]:** two "Score Info" screenshots per match (a scrolling list; two cover all 15 umas); one upload can hold several matches, paired by upload order.
+- [x] **OCR extraction (Tesseract.js, client-side):** read each row's uma name, points, and distance from the screenshots, ignoring the epithet banners.
 - [x] **De-duplicate overlapping rows** between the two screenshots (a row can appear cut off in both).
-- [x] **Log each match** to browser storage (IndexedDB) [Blueprint].
+- [x] **Log each match** to browser storage (IndexedDB), by screenshots or manual entry.
 - [x] **Simple Mode [Developer]:** the MVP has no Ace adjustment or any other score adjustment — all 15 umas' raw Gained Scores are compared equally by their averages. Advanced Mode is Phase 2.
 - [x] **Rolling average per uma [Developer]:** over all history.
-- [x] **Delete/upgrade an uma [Developer]:** when the player replaces *or upgrades* an uma, they delete it in the app. This nulls all existing data for that uma; data recorded afterward is valid.
+- [x] **Delete/upgrade an uma [Developer]:** when the player replaces *or upgrades* an uma, they delete its scores in the app. Those scores are marked deleted: excluded from stats, shown struck through in Match history. Scores recorded afterward count.
 - [x] **Weakest link and upgrade recommendation [Developer]:** compare averages across all 15 umas. Whoever has the lowest raw average is recommended to upgrade next.
 - [x] **Player-set roster [Developer]:** fill the roster by hand or auto-fill it from the first screenshot batch; view each uma's every score, average, high, and low.
 - [x] **Undo a match [Developer]:** delete all of a logged match's scores.
-- [ ] **Export/Import backup [Blueprint]** as a `.json` file.
-- [ ] **Request persistent storage [Blueprint]** via `navigator.storage.persist()`.
+- [x] **Built extras [Developer]:** duplicate-match warning, sortable roster columns, delete all / out-of-date matches, reset roster, edit an empty roster slot (details in `docs/decisions.md`).
+- [ ] **Export/Import backup [Developer]** as a `.json` file.
+- [ ] **Request persistent storage [Developer]** via `navigator.storage.persist()`.
 
 ## Phase 2: Advanced Mode — rank and opponent rating [Developer: a later phase]
 
@@ -30,7 +31,6 @@ Feature timeline for the Uma Team Trials Score Auditor. Items tagged **[Develope
   - **I:** `I_i = average Base_i × (1 + Mopp_without_i + SupportRate)` — the uma's own score not attributable to its Rating.
   - **T:** `T_i = (Mopp(TeamRating) − Mopp_without_i) × Σ (average Base of all 15 umas)` — the score across all 15 umas due to the multiplier gained by having the uma (equivalently, the sum of the 15 scores at the current multiplier minus the sum at the reduced multiplier).
   - **S:** `S_i = I_i + T_i`, added unscaled for now (whether they need scaling is an open question).
-- [ ] **Normalized scores:** Average Score / Opponent Tier Modifier, to remove bracket inflation. *(Note: this may now be superseded by the contribution-score model above — not decided.)*
 - Team Rating is entered by the player (Advanced Mode) and the opponent rating comes from the curve, so neither needs a data source. Each uma's RANK badge (its Rating, needed for `T`) does: Score Info and Edit Team show it, but how it is captured is undecided (see `docs/decisions.md`).
 
 ## Much Later

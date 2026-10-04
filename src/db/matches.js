@@ -1,10 +1,6 @@
 import { db, isActive } from './db'
-import { ROSTER_SIZE } from './constants'
+import { normalizeName } from './constants'
 import { createRoster, getRoster } from './roster'
-
-function normalizeName(name) {
-  return name.trim().toLowerCase()
-}
 
 // `matches`: [{ source, entries: [{ rosterId, points }] }]. All matches in
 // one call share `playedAt` (one batch upload). Resolves to the new match ids.
@@ -109,9 +105,8 @@ export function findWeakestLink(stats) {
 
 // Every logged match, newest first, with its entries highest points first.
 // An active entry shows its slot's current name and distance; a deleted one
-// shows the snapshot taken when it was deleted. `missingCount` counts
-// entries hard-deleted before deletes kept a snapshot (no details left).
-// A match with any deleted or missing uma is out of date with the roster.
+// shows the snapshot taken when it was deleted. A match with any deleted
+// uma is out of date with the roster.
 export async function getMatchHistory() {
   const [roster, matches, entries] = await Promise.all([
     db.roster.toArray(),
@@ -130,15 +125,13 @@ export async function getMatchHistory() {
           return { entryId: entry.id, umaName, distance, points: entry.points, deleted: !isActive(entry) }
         })
         .sort((a, b) => b.points - a.points)
-      const missingCount = Math.max(0, ROSTER_SIZE - matchEntries.length)
 
       return {
         matchId: match.id,
         playedAt: match.playedAt,
         source: match.source,
         entries: matchEntries,
-        missingCount,
-        deletedCount: matchEntries.filter((entry) => entry.deleted).length + missingCount,
+        deletedCount: matchEntries.filter((entry) => entry.deleted).length,
       }
     })
     .sort(newestFirst)
@@ -173,11 +166,11 @@ export async function getMatchKeys() {
 
 // Same rule as getMatchHistory's deletedCount > 0.
 function isOutOfDate(matchEntries) {
-  return matchEntries.length < ROSTER_SIZE || !matchEntries.every(isActive)
+  return !matchEntries.every(isActive)
 }
 
-// Deletes every match that's out of date with the roster (any deleted or
-// missing uma). Resolves to the number of matches deleted.
+// Deletes every match that's out of date with the roster (any deleted
+// uma). Resolves to the number of matches deleted.
 export async function deleteOutOfDateMatches() {
   return db.transaction('rw', db.matches, db.matchEntries, async () => {
     const [matches, entries] = await Promise.all([db.matches.toArray(), db.matchEntries.toArray()])

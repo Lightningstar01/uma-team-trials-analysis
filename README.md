@@ -1,16 +1,15 @@
-# React + Vite
+# Uma Team Trials Score Auditor
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A free, browser-only tool for **Uma Musume: Pretty Derby** (Global) Team Trials. Upload your "Score Info" screenshots, and it reads them with client-side OCR (Tesseract.js), stores only the scores in your browser (IndexedDB), tracks each roster uma's average, and flags the weakest link to upgrade next. Nothing is uploaded to a server.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```sh
+npm install
+npm run dev     # local dev server
+npm test        # unit tests (Vitest)
+npm run lint
+npm run build
+```
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Project context lives in [CLAUDE.md](CLAUDE.md); game mechanics, roadmap, and decisions are in [docs/](docs/).

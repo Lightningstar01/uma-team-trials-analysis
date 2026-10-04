@@ -1,6 +1,4 @@
-function normalizeName(name) {
-  return name.trim().toLowerCase()
-}
+import { normalizeName } from '../db/constants.js'
 
 function hasPoints(row) {
   return row.points !== '' && row.points != null

@@ -1,3 +1,5 @@
+import { normalizeName } from '../db/constants.js'
+
 // Known Uma Musume: Pretty Derby playable character names (Global, English
 // UI), developer-supplied. Used two ways in `parseScoreInfo.js`:
 //
@@ -134,11 +136,7 @@ export const UMA_NAMES = [
   'Zenno Rob Roy',
 ]
 
-function normalize(name) {
-  return name.trim().toLowerCase()
-}
-
-const NORMALIZED_LOOKUP = new Map(UMA_NAMES.map((name) => [normalize(name), name]))
+const NORMALIZED_LOOKUP = new Map(UMA_NAMES.map((name) => [normalizeName(name), name]))
 
 // Returns the dictionary's canonical spelling when `text` matches a known
 // uma name exactly (case/whitespace-insensitive), otherwise null. Exact
@@ -147,7 +145,7 @@ const NORMALIZED_LOOKUP = new Map(UMA_NAMES.map((name) => [normalize(name), name
 // the split-row rescue in parseScoreInfo.js; for a name already anchored to
 // a confirmed row, use `resolveUmaName` instead.
 export function lookupUmaName(text) {
-  return NORMALIZED_LOOKUP.get(normalize(text)) ?? null
+  return NORMALIZED_LOOKUP.get(normalizeName(text)) ?? null
 }
 
 // Standard edit-distance DP: the minimum number of single-character
@@ -174,11 +172,11 @@ function levenshteinDistance(a, b) {
 // name - there's no "no match" case, since the caller decides what counts
 // as close enough.
 export function closestUmaName(text) {
-  const normalized = normalize(text)
+  const normalized = normalizeName(text)
   let bestName = UMA_NAMES[0]
   let bestDistance = Infinity
   for (const name of UMA_NAMES) {
-    const distance = levenshteinDistance(normalized, normalize(name))
+    const distance = levenshteinDistance(normalized, normalizeName(name))
     if (distance < bestDistance) {
       bestDistance = distance
       bestName = name

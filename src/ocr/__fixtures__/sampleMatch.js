@@ -19,9 +19,3 @@ export const sampleMatch = [
   { umaName: 'Haru Urara', distance: 'Dirt', points: 41312 },
   { umaName: 'Gold City', distance: 'Mile', points: 39918 },
 ]
-
-// The row genuinely split across both real screenshots (see
-// docs/decisions.md): screenshot 1 captures its name+points but the
-// distance pill is cut off at the bottom edge; screenshot 2's leading
-// fragment for it doesn't OCR into anything usable at all.
-export const SPLIT_ROW_NAME = 'Air Groove'

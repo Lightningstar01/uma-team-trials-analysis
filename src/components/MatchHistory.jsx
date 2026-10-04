@@ -55,12 +55,6 @@ function MatchHistoryItem({ match }) {
               </li>
             ))}
           </ul>
-          {match.missingCount > 0 && (
-            <p className="muted">
-              {match.missingCount} earlier deleted {match.missingCount === 1 ? 'uma' : 'umas'} (details not
-              kept)
-            </p>
-          )}
         </div>
       )}
     </li>

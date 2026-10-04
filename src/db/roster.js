@@ -1,9 +1,5 @@
 import { db, isActive } from './db'
-import { DISTANCES, DISTANCE_ORDER, ROSTER_SIZE } from './constants'
-
-function normalizeName(name) {
-  return name.trim().toLowerCase()
-}
+import { DISTANCES, DISTANCE_ORDER, ROSTER_SIZE, normalizeName } from './constants'
 
 export function sortRoster(slots) {
   return [...slots].sort((a, b) => {

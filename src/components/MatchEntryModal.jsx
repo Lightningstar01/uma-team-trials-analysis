@@ -1,43 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { DISTANCE_ORDER, ROSTER_SIZE } from '../db/constants'
+import { DISTANCE_ORDER } from '../db/constants'
 import { addMatches, createRosterWithMatches, getMatchKeys, matchKey } from '../db/matches'
 import { validateRoster } from '../db/roster'
 import { validateRows } from '../ocr/parseScoreInfo'
 import { mapOcrRowsToRoster } from '../ocr/matchToRoster'
 import { formatPlayedAt } from './format'
+import { findBadPoints, findRosterMismatch, toSetupGridRows } from './matchEntry'
 import { sortEntryRowsByPoints } from './rosterSort'
-
-function normalizeName(name) {
-  return name.trim().toLowerCase()
-}
-
-function blankRow() {
-  return { umaName: '', distance: DISTANCE_ORDER[0], points: '' }
-}
-
-// Setup mode (no roster yet): OCR rows stay in the screenshots' own order
-// so the grid can be fact-checked row-by-row against the phone. A null
-// distance is coalesced to a valid <select> value; the OCR warning is what
-// tells the user to double-check that row.
-function toSetupGridRows(ocrRows, ocrWarnings) {
-  const warnings = [...ocrWarnings]
-  const rows = ocrRows.slice(0, ROSTER_SIZE).map((row) => ({
-    umaName: row.umaName,
-    distance: row.distance ?? DISTANCE_ORDER[0],
-    points: String(row.points),
-  }))
-
-  if (ocrRows.length > ROSTER_SIZE) {
-    warnings.push(`Found ${ocrRows.length} rows, expected ${ROSTER_SIZE} — the extra rows were dropped.`)
-  } else if (ocrRows.length < ROSTER_SIZE) {
-    warnings.push(
-      `Found ${ocrRows.length} rows, expected ${ROSTER_SIZE} — the missing rows were left blank, please fill them in.`
-    )
-  }
-  while (rows.length < ROSTER_SIZE) rows.push(blankRow())
-
-  return { rows, warnings }
-}
 
 // With a roster, each match's rows are sorted by points once, here, to line
 // up with the screenshots - not on every edit, which would move the row
@@ -58,26 +27,6 @@ function toLocalDatetimeValue(date) {
   const offset = date.getTimezoneOffset()
   const local = new Date(date.getTime() - offset * 60_000)
   return local.toISOString().slice(0, 16)
-}
-
-function findBadPoints(rows) {
-  return rows.find((row) => {
-    const points = Number(row.points)
-    return row.points === '' || !Number.isInteger(points) || points <= 0
-  })
-}
-
-// Setup-mode check: every match in the batch must have match 1's umas, at
-// the same distances (batch roster assumption - see docs/decisions.md).
-function findRosterMismatch(rosterRows, rows) {
-  const distanceByName = new Map(rosterRows.map((r) => [normalizeName(r.umaName), r.distance]))
-  if (rows.length !== rosterRows.length) return `has ${rows.length} umas, but Match 1 has ${rosterRows.length}.`
-  for (const row of rows) {
-    const rosterDistance = distanceByName.get(normalizeName(row.umaName))
-    if (rosterDistance === undefined) return `${row.umaName} isn't in Match 1 — every match in a batch must have the same roster.`
-    if (rosterDistance !== row.distance) return `${row.umaName} is ${row.distance} here but ${rosterDistance} in Match 1.`
-  }
-  return null
 }
 
 // The playedAt of a logged match with exactly this draft's 15 scores, or

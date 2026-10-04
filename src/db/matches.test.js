@@ -163,8 +163,8 @@ describe('getMatchHistory', () => {
     })
 
     expect(await getMatchHistory()).toMatchObject([
-      { matchId: newer, playedAt: '2026-01-02T00:00:00.000Z', source: 'ocr', deletedCount: 0, missingCount: 0 },
-      { matchId: older, playedAt: '2026-01-01T00:00:00.000Z', source: 'manual', deletedCount: 0, missingCount: 0 },
+      { matchId: newer, playedAt: '2026-01-02T00:00:00.000Z', source: 'ocr', deletedCount: 0 },
+      { matchId: older, playedAt: '2026-01-01T00:00:00.000Z', source: 'manual', deletedCount: 0 },
     ])
   })
 
@@ -186,23 +186,11 @@ describe('getMatchHistory', () => {
 
     const [match] = await getMatchHistory()
     expect(match.deletedCount).toBe(1)
-    expect(match.missingCount).toBe(0)
     expect(match.entries.find((e) => e.points === 100)).toMatchObject({
       umaName: 'Uma 1',
       distance: 'Sprint',
       deleted: true,
     })
-  })
-
-  it('counts entries missing from a match as deleted', async () => {
-    const ids = await createRoster(makeRosterRows())
-    await addMatches({
-      playedAt: '2026-01-01T00:00:00.000Z',
-      matches: [{ entries: fullMatchEntries(ids).slice(1) }],
-    })
-
-    const [match] = await getMatchHistory()
-    expect(match).toMatchObject({ missingCount: 1, deletedCount: 1 })
   })
 
   it('breaks a playedAt tie by newest match id first', async () => {
@@ -298,15 +286,11 @@ describe('deleteAllMatches', () => {
 })
 
 describe('deleteOutOfDateMatches', () => {
-  it('deletes matches with a deleted or missing uma, and keeps up-to-date ones', async () => {
+  it('deletes matches with a deleted uma, and keeps up-to-date ones', async () => {
     const ids = await createRoster(makeRosterRows())
-    const [withDeleted, upToDate, withMissing] = await addMatches({
+    const [withDeleted, upToDate] = await addMatches({
       playedAt: '2026-01-01T00:00:00.000Z',
-      matches: [
-        { entries: fullMatchEntries(ids) },
-        { entries: fullMatchEntries(ids) },
-        { entries: fullMatchEntries(ids).slice(1) },
-      ],
+      matches: [{ entries: fullMatchEntries(ids) }, { entries: fullMatchEntries(ids) }],
     })
     // Marks Uma 1 deleted in the first match only, so the second stays up to date.
     await db.matchEntries
@@ -315,10 +299,10 @@ describe('deleteOutOfDateMatches', () => {
       .filter((e) => e.rosterId === ids[0])
       .modify({ deleted: { umaName: 'Uma 1', distance: 'Sprint' } })
 
-    expect(await deleteOutOfDateMatches()).toBe(2)
+    expect(await deleteOutOfDateMatches()).toBe(1)
 
     expect((await db.matches.toArray()).map((m) => m.id)).toEqual([upToDate])
-    expect(await db.matchEntries.where('matchId').anyOf([withDeleted, withMissing]).count()).toBe(0)
+    expect(await db.matchEntries.where('matchId').equals(withDeleted).count()).toBe(0)
     expect(await db.matchEntries.where('matchId').equals(upToDate).count()).toBe(15)
   })
 

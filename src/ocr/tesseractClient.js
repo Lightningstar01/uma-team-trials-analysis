@@ -1,5 +1,5 @@
-// Thin wrapper around Tesseract.js's worker lifecycle. Imported dynamically by
-// callers (never at module load time) so Tesseract's JS/wasm/lang-data are
+// Thin wrapper around Tesseract.js's worker lifecycle. `tesseract.js` itself
+// is imported dynamically (in getWorker), so its JS/wasm/lang-data are
 // code-split out of the main bundle and only fetched once a screenshot is
 // actually uploaded.
 
@@ -17,7 +17,7 @@ async function getWorker() {
 
 // Tesseract only returns line/word-level bounding boxes when `blocks` output
 // is requested, nested as blocks -> paragraphs -> lines -> words. Flatten
-// that into a single list of { text, bbox, words } for the row-band parser.
+// that into a single list of { text, bbox, words } for the row parser.
 // Word-level bboxes matter because a recognized line's text often has OCR
 // noise from the portrait/badge art mixed in before the real name (see
 // docs/decisions.md) — isolating the name by each word's x-position is far

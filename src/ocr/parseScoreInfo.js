@@ -1,11 +1,11 @@
-import { DISTANCE_ORDER, ROSTER_SIZE } from '../db/constants.js'
+import { DISTANCE_ORDER, ROSTER_SIZE, normalizeName } from '../db/constants.js'
 import { lookupUmaName, resolveUmaName } from './umaNames.js'
 
 // Matches "80,936 pts" / "999pts" / "PTS" etc. Group 1 is the digits+commas.
 const POINTS_REGEX = /(\d{1,3}(?:,\d{3})*)\s*pts?\b/i
 
 // Uma name words in a Score Info name+points line always start in this
-// x-range on the two real 1080px-wide fixtures: OCR noise bleeding in from
+// x-range on the real 1080px-wide fixtures: OCR noise bleeding in from
 // the portrait/badge art ends by x1≈209, the name itself starts at
 // x0≈279-280, and the points column starts at x0≈752. A different
 // screenshot resolution/aspect ratio may need this re-tuned.
@@ -151,29 +151,17 @@ export function parseScreenshotRows(lines) {
 
     // Points takes priority: a name+points line is the more specific/positive
     // signal, so it's checked before falling back to distance-word matching.
-    const pointsMatch = text.match(POINTS_REGEX)
-    if (pointsMatch) {
+    // A "pts" match wins over a bare comma-formatted points-column token.
+    const pointsText =
+      text.match(POINTS_REGEX)?.[1] ??
+      words.find((w) => w.bbox.x0 >= NAME_COLUMN_X_RANGE.max && BARE_POINTS_REGEX.test(w.text))?.text
+    if (pointsText) {
       const rawName = extractUmaName(words)
-      const points = Number(pointsMatch[1].replace(/,/g, ''))
+      const points = Number(pointsText.replace(/,/g, ''))
       if (rawName) {
-        // This line already anchors a confirmed row (it has a points match),
-        // so an inexact name is corrected to the closest dictionary entry
-        // rather than kept as raw OCR text - see umaNames.js.
-        const { name: umaName, exact } = resolveUmaName(rawName)
-        nameCandidates.push({ umaName, points, yc, rawName: exact ? undefined : rawName })
-      } else {
-        orphanPoints.push({ points, yc })
-      }
-      continue
-    }
-
-    const barePointsWord = words.find(
-      (w) => w.bbox.x0 >= NAME_COLUMN_X_RANGE.max && BARE_POINTS_REGEX.test(w.text)
-    )
-    if (barePointsWord) {
-      const rawName = extractUmaName(words)
-      const points = Number(barePointsWord.text.replace(/,/g, ''))
-      if (rawName) {
+        // This line already anchors a confirmed row (it has points), so an
+        // inexact name is corrected to the closest dictionary entry rather
+        // than kept as raw OCR text - see umaNames.js.
         const { name: umaName, exact } = resolveUmaName(rawName)
         nameCandidates.push({ umaName, points, yc, rawName: exact ? undefined : rawName })
       } else {
@@ -263,10 +251,6 @@ export function findLeadingDistance(lines) {
   distanceLines.sort((a, b) => a.yc - b.yc)
   const topDistance = distanceLines[0]
   return topDistance.yc < firstNameY ? topDistance.distance : null
-}
-
-function normalizeName(name) {
-  return name.trim().toLowerCase()
 }
 
 function distanceMissingWarning(umaName) {

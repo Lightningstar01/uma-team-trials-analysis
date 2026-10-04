@@ -4,7 +4,7 @@ How Team Trials works in Uma Musume: Pretty Derby (Global, English). Everything 
 
 ## Roster and Aces
 
-A roster is 15 characters (umas). Five are "Aces" — exactly one per distance category, always the top slot of that distance's column on the Edit Team screen. Aces get a scoring bonus (see Multipliers, below). Aces are set once; the player can change them, and the app can pick them up either from manual entry or from an Edit Team screenshot.
+A roster is 15 characters (umas). Five are "Aces" — exactly one per distance category, always the top slot of that distance's column on the Edit Team screen. Aces get a scoring bonus (see Multipliers, below). Aces are set once; the player can change them. Advanced Mode (Phase 2) plans to pick them up from manual entry or an Edit Team screenshot.
 
 The Edit Team and Race Results screens show umas only as portraits with RANK badges — no names — so matching a portrait to a specific uma needs a reference database of umas, and the matching method itself isn't decided (see `decisions.md`).
 
@@ -331,7 +331,7 @@ Example: UG4 = 295,000 + 6,500 × 4 = 321,000.
 | Race Results | Screen showing the five races, WIN/LOSE, and finishing places |
 | Gained Score | An uma's total points for the match; equals its Score Info points |
 | Team Bonus | A separate bonus block on Score Details, not part of any uma's Gained Score |
-| RANK badge | The game's assessment of an uma's score; feeds Team Rating |
+| RANK badge | The game's assessment of an uma's Rating (separate from Gained Score); feeds Team Rating |
 | Team Rating / Team Rank | The player's current Team Trials rating (badge and numeric value, e.g. UG4 323,886); same figure used for opponent selection and the Opponent Rating Bonus. Opponents have one too |
 | Ace | The designated top slot per distance on Edit Team; adds a +10% Ace Bonus |
 | Opponent Rating Bonus | The score multiplier driven by the chosen opponent's Team Rating, relative to the player's own (also called the "opponent tier modifier") |

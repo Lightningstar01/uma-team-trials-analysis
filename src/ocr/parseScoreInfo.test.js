@@ -177,12 +177,6 @@ describe('parseScreenshotRows', () => {
     expect(rows).toEqual(sampleMatch.slice(8, 15))
   })
 
-  it('returns rows top to bottom', () => {
-    const rows = parseScreenshotRows(screenshot1Lines())
-    const ys = rows.map((r) => sampleMatch.findIndex((s) => s.umaName === r.umaName))
-    expect(ys).toEqual([...ys].sort((a, b) => a - b))
-  })
-
   it('drops noise lines without producing spurious rows', () => {
     const lines = [
       noiseLine(100, 'Legendary Reprise'),
