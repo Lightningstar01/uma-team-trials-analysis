@@ -58,6 +58,11 @@ Holds only (1) decisions and rationale not already stated as current state in `C
   - Deleted scores are marked, not erased: `deleted: { umaName, distance }` snapshot, unindexed, no schema bump. They never count toward stats or the duplicate check.
   - A match with no active scores left is removed.
   - An upgraded uma with the same name works the same way: its old scores are deleted, and new matches add active scores to the slot.
+- **Backup [Developer]:**
+  - The file is the three tables' raw rows with their ids (so `rosterId`/`matchId` links and deleted snapshots survive), tagged `format: 'uma-team-trials-backup'` and `version: 1`.
+  - Import replaces everything (no merge), after a confirm when data exists. It's all or nothing: the file is validated first (roster rules, ids, links, points), then written in one transaction, and only known fields are copied.
+  - Available from the Backup card and from the first-run setup screen, so a new browser or device can restore without setting up a roster first.
+- **Persistent storage [Developer]:** `persist()` is requested once a roster exists (any path, including import), not on first load, so Firefox's prompt comes after the player has data. If it isn't granted, the Backup card says the browser may clear data and to export often.
 
 ### UI
 
@@ -71,6 +76,8 @@ Holds only (1) decisions and rationale not already stated as current state in `C
   - A collapsible list. Each match expands to all its umas (distance, name, points, highest first), so batch-mates can be told apart. A deleted uma is struck through and labeled "Deleted".
   - The collapsed row shows an "N deleted" badge and "Out of date with current roster". The player decides whether to keep the match (other umas' scores still count) or delete it.
   - Any match can be deleted. At the top right: "Delete out-of-date matches (N)" (shown only when N ≥ 1, with a confirm), then "Delete all matches", which keeps the roster, unlike Reset roster.
+
+- **Footer disclaimer [Developer]:** scores are Score Info Gained Scores and exclude the Team Bonus; data stays in this browser (screenshots never leave the device), so export a backup. Phase 2 disclaimers (opponent curve, aptitude) are added with Advanced Mode.
 
 ### Testing strategy
 

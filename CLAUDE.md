@@ -17,7 +17,7 @@ Why it's new: existing community tools (UmaTools, Umalator) cover support card t
 
 ## Status
 
-MVP (Simple Mode) is built: roster setup (manual or auto-fill), screenshot/manual match entry, per-uma stats and weakest link, match history. Remaining MVP items: Export/Import backup, persistent storage. Hosting is undecided. Phase 2 (Advanced Mode) follows. See `docs/roadmap.md`. Docs began from an AI blueprint conversation plus the developer's screenshots; the scoring/Advanced Mode math was worked out with the developer.
+MVP (Simple Mode) is complete: roster setup (manual, auto-fill, or from a backup), screenshot/manual match entry, per-uma stats and weakest link, match history, Export/Import backup, persistent storage request, and the footer disclaimer. Next: hosting (undecided), then Phase 2 (Advanced Mode). See `docs/roadmap.md`. Docs began from an AI blueprint conversation plus the developer's screenshots; the scoring/Advanced Mode math was worked out with the developer.
 
 ## Architecture
 
@@ -36,8 +36,8 @@ MVP (Simple Mode) is built: roster setup (manual or auto-fill), screenshot/manua
 | Advanced Mode (Phase 2) | Ranks umas by `S = I + T` (own score + score its Rating adds to the team) after removing Ace, Support, and Opponent Rating effects. Player enters Support rate and Team Rating once and keeps them current; each match snapshots them; Aces flagged per match (a match keeps its flags after Aces change). Assumes the Top Option is always picked | **Decided** |
 | Opponent rating (Phase 2) | Empirical curve of the Top Option's multiplier vs. Team Rating, fitted from developer samples (not Team Rank floors); assumed to continue beyond sampled ratings, with a site disclaimer | **Decided** |
 | Ace detection (Phase 2) | Parse the Edit Team screenshot (manual entry stays an option); needs a developer-provided database of potential umas | **Decided** |
-| Backup | Export/Import full history as `.json` (MVP, not built) | **Decided** |
-| Storage protection | `navigator.storage.persist()` (MVP, not built) | **Decided** |
+| Backup | Export/Import full history as `.json`; import replaces everything, all or nothing | **Built** |
+| Storage protection | `navigator.storage.persist()`, requested once a roster exists | **Built** |
 | Hosting | GitHub Pages, Vercel, or Netlify (all free) | Undecided |
 
 Constraints: images are processed locally and discarded; only numbers are stored (blueprint estimate ~1–2 KB/match, ~15–20 MB per 10,000 matches). Data lives only in the browser, so backup/restore is first-class. Rationale and the full decision log: `docs/decisions.md`.
@@ -58,6 +58,8 @@ Constraints: images are processed locally and discarded; only numbers are stored
     │   ├── db.js                    # Dexie schema (v2: roster table; entries keyed by rosterId) + isActive (skips deleted entries)
     │   ├── constants.js             # Distance order, ROSTER_SIZE, normalizeName (the one name-matching rule)
     │   ├── roster.js                # Roster get/create/validate, edit an empty slot, reset everything
+    │   ├── backup.js                # Export the whole DB as tagged JSON; validate and import a backup (replaces everything)
+    │   ├── storage.js               # Request persistent storage (navigator.storage.persist)
     │   └── matches.js               # Add matches (optionally creating the roster), per-slot stats, weakest link, match history, duplicate-match keys, delete match / out-of-date / all, delete one uma's scores (marked deleted with a snapshot)
     ├── ocr/
     │   ├── imageValidation.js       # Upload type/size check
@@ -68,7 +70,9 @@ Constraints: images are processed locally and discarded; only numbers are stored
     │   ├── matchToRoster.js         # Match one match's OCR rows to roster slots, fixing one misread by elimination
     │   └── __fixtures__/            # Score_Info_<n><a|b>.jpg (n = match, a = top, b = bottom; both needed) + sampleMatch.js (15-row reference)
     ├── components/
-    │   ├── RosterSetup.jsx          # First run: fill roster manually or auto-fill from screenshots
+    │   ├── RosterSetup.jsx          # First run: fill roster manually, auto-fill from screenshots, or import a backup
+    │   ├── BackupCard.jsx           # Export/Import backup, non-persistent storage note
+    │   ├── useBackupImport.js       # Shared import flow (pick file, validate, confirm, import)
     │   ├── RosterDashboard.jsx      # Sortable roster stats, expandable scores, weakest link, delete scores, edit empty slot, reset
     │   ├── MatchHistory.jsx         # Collapsible match list: per-match umas (deleted struck through), out-of-date flag, delete match / out-of-date / all
     │   ├── MatchEntryModal.jsx      # <dialog> for logging matches (manual or screenshots), one page per match, duplicate-match warning

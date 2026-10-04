@@ -1,12 +1,14 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { getRoster } from './db/roster'
+import { requestPersistentStorage } from './db/storage'
 import { UMA_NAMES } from './ocr/umaNames'
 import { readScoreInfoBatch } from './ocr/readScoreInfoBatch'
 import RosterSetup from './components/RosterSetup'
 import RosterDashboard from './components/RosterDashboard'
 import MatchHistory from './components/MatchHistory'
 import MatchEntryModal from './components/MatchEntryModal'
+import BackupCard from './components/BackupCard'
 import './App.css'
 
 function App() {
@@ -16,6 +18,24 @@ function App() {
   // `id` remounts the modal so each open starts from fresh state.
   const [entryRequest, setEntryRequest] = useState(null)
   const fileInputRef = useRef(null)
+  // 'persisted' | 'not-persisted' | 'unsupported', or null until asked.
+  const [storageStatus, setStorageStatus] = useState(null)
+  const hasRoster = roster !== undefined && roster.length > 0
+
+  // Ask once there's data worth keeping (a roster saved by any path,
+  // including import), so Firefox's permission prompt has a reason behind it.
+  useEffect(() => {
+    if (!hasRoster) return
+    let cancelled = false
+    requestPersistentStorage()
+      .catch(() => 'unsupported')
+      .then((status) => {
+        if (!cancelled) setStorageStatus(status)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [hasRoster])
 
   const openScreenshotPicker = () => fileInputRef.current?.click()
 
@@ -45,7 +65,7 @@ function App() {
           <RosterSetup onAutoFill={openScreenshotPicker} />
         )}
 
-        {roster !== undefined && roster.length > 0 && (
+        {hasRoster && (
           <>
             <RosterDashboard />
             <section className="card log-match">
@@ -70,9 +90,21 @@ function App() {
               </div>
             </section>
             <MatchHistory />
+            <BackupCard storageStatus={storageStatus} />
           </>
         )}
       </main>
+
+      <footer className="app-footer">
+        <p>
+          Scores are each uma&apos;s Gained Score from the Score Info screen. The Team Bonus (shown only on
+          Score Details) isn&apos;t included in any average.
+        </p>
+        <p>
+          Your data is stored only in this browser, and screenshots never leave your device. Export a backup
+          to keep it safe or move it to another device.
+        </p>
+      </footer>
 
       <input
         ref={fileInputRef}

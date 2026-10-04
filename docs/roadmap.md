@@ -15,8 +15,9 @@ Feature timeline for the Uma Team Trials Score Auditor. Items tagged **[Develope
 - [x] **Player-set roster [Developer]:** fill the roster by hand or auto-fill it from the first screenshot batch; view each uma's every score, average, high, and low.
 - [x] **Undo a match [Developer]:** delete all of a logged match's scores.
 - [x] **Built extras [Developer]:** duplicate-match warning, sortable roster columns, delete all / out-of-date matches, reset roster, edit an empty roster slot (details in `docs/decisions.md`).
-- [ ] **Export/Import backup [Developer]** as a `.json` file.
-- [ ] **Request persistent storage [Developer]** via `navigator.storage.persist()`.
+- [x] **Export/Import backup [Developer]** as a `.json` file, from a Backup card or the first-run setup screen.
+- [x] **Request persistent storage [Developer]** via `navigator.storage.persist()`.
+- [x] **Site disclaimer [Developer]:** footer noting the Team Bonus is excluded and data lives only in this browser.
 
 ## Phase 2: Advanced Mode — rank and opponent rating [Developer: a later phase]
 

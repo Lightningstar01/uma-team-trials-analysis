@@ -581,3 +581,19 @@ tr.weakest-link:hover {
     transform: rotate(360deg);
   }
 }
+
+.setup-errors {
+  margin-top: 16px;
+}
+
+/* ---------- footer ---------- */
+
+.app-footer {
+  margin: 32px 0 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.app-footer p + p {
+  margin-top: 4px;
+}

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { DISTANCE_ORDER, ROSTER_SIZE } from '../db/constants'
 import { createRoster, validateRoster } from '../db/roster'
 import { validateRows } from '../ocr/parseScoreInfo'
+import { useBackupImport } from './useBackupImport'
 
 // Pre-fills 3 slots per distance category, matching the game's fixed shape.
 function blankRosterRows() {
@@ -16,6 +17,8 @@ function RosterSetup({ onAutoFill }) {
   const [step, setStep] = useState('choose')
   const [rows, setRows] = useState(blankRosterRows)
   const [errors, setErrors] = useState([])
+  // Nothing is stored yet on this screen, so there's nothing to confirm replacing.
+  const backupImport = useBackupImport({ confirmReplace: false })
 
   const updateRow = (index, field, value) => {
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)))
@@ -54,7 +57,19 @@ function RosterSetup({ onAutoFill }) {
               umas become your roster.
             </span>
           </button>
+          <button type="button" className="choice" onClick={backupImport.chooseFile}>
+            <strong>Import a backup</strong>
+            <span>Restore a .json backup exported from this app, with all its matches.</span>
+          </button>
         </div>
+        <input {...backupImport.inputProps} />
+        {backupImport.errors.length > 0 && (
+          <ul className="errors setup-errors">
+            {backupImport.errors.map((error) => (
+              <li key={error}>{error}</li>
+            ))}
+          </ul>
+        )}
       </section>
     )
   }
