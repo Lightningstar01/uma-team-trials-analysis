@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nextSort, sortRosterStats } from './rosterSort.js'
+import { nextSort, sortEntryRowsByPoints, sortRosterStats } from './rosterSort.js'
 
 const STATS = [
   { id: 1, umaName: 'Bravo', distance: 'Sprint', average: 300, high: 400, low: 200, matchCount: 2 },
@@ -40,6 +40,33 @@ describe('sortRosterStats', () => {
     const copy = [...STATS]
     sortRosterStats(STATS, { key: 'average', direction: 'asc' })
     expect(STATS).toEqual(copy)
+  })
+})
+
+describe('sortEntryRowsByPoints', () => {
+  it('orders rows by points, highest first, comparing numerically', () => {
+    const rows = [
+      { id: 1, points: '9000' },
+      { id: 2, points: '78851' },
+      { id: 3, points: '45216' },
+    ]
+    expect(ids(sortEntryRowsByPoints(rows))).toEqual([2, 3, 1])
+  })
+
+  it('puts blank points last, keeping incoming order for blanks and ties', () => {
+    const rows = [
+      { id: 1, points: '' },
+      { id: 2, points: '500' },
+      { id: 3, points: '' },
+      { id: 4, points: '500' },
+    ]
+    expect(ids(sortEntryRowsByPoints(rows))).toEqual([2, 4, 1, 3])
+  })
+
+  it('does not mutate the input', () => {
+    const rows = [{ id: 1, points: '1' }, { id: 2, points: '2' }]
+    sortEntryRowsByPoints(rows)
+    expect(ids(rows)).toEqual([1, 2])
   })
 })
 

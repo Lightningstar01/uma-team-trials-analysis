@@ -509,6 +509,31 @@ describe('mergeScreenshotRows', () => {
 describe('applyBatchRosterFallback', () => {
   const match = (rows, warnings = []) => ({ rows, warnings })
 
+  it('does not insert a blank row for an uma whose corrected name another match read exactly', () => {
+    const correction = 'Taiki Shuttle: OCR read "Tiki Shuttle" — corrected to the closest known uma, please verify.'
+    const matches = [
+      match([
+        { umaName: 'Taiki Shuttle', distance: 'Dirt', points: 50000 },
+        { umaName: 'Haru Urara', distance: 'Dirt', points: 40000 },
+      ]),
+      match(
+        [
+          { umaName: 'Taiki Shuttle', correctedFrom: 'Tiki Shuttle', distance: 'Dirt', points: 59771 },
+          { umaName: 'Haru Urara', distance: 'Dirt', points: 64261 },
+        ],
+        [correction]
+      ),
+    ]
+
+    const result = applyBatchRosterFallback(matches)
+
+    expect(result[1].rows).toEqual([
+      { umaName: 'Taiki Shuttle', correctedFrom: 'Tiki Shuttle', distance: 'Dirt', points: 59771 },
+      { umaName: 'Haru Urara', distance: 'Dirt', points: 64261 },
+    ])
+    expect(result[1].warnings).toEqual([correction])
+  })
+
   it('fills a null distance in a later match using an earlier match\'s confidently-resolved row', () => {
     const matches = [
       match([{ umaName: 'Oguri Cap', distance: 'Dirt', points: 40000 }]),

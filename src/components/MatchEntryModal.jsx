@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { DISTANCE_ORDER, ROSTER_SIZE } from '../db/constants'
-import { addMatches, createRosterWithMatches } from '../db/matches'
+import { addMatches, createRosterWithMatches, getMatchKeys, matchKey } from '../db/matches'
 import { validateRoster } from '../db/roster'
 import { validateRows } from '../ocr/parseScoreInfo'
 import { mapOcrRowsToRoster } from '../ocr/matchToRoster'
+import { formatPlayedAt } from './format'
+import { sortEntryRowsByPoints } from './rosterSort'
 
 function normalizeName(name) {
   return name.trim().toLowerCase()
@@ -37,13 +39,16 @@ function toSetupGridRows(ocrRows, ocrWarnings) {
   return { rows, warnings }
 }
 
+// With a roster, each match's rows are sorted by points once, here, to line
+// up with the screenshots - not on every edit, which would move the row
+// being typed into.
 function toDrafts(ocrMatches, roster) {
   return ocrMatches.map(({ rows, warnings }) => {
     const shaped =
       roster.length === 0 ? toSetupGridRows(rows, warnings) : mapOcrRowsToRoster(rows, roster)
     return {
       source: 'ocr',
-      rows: shaped.rows,
+      rows: roster.length === 0 ? shaped.rows : sortEntryRowsByPoints(shaped.rows),
       warnings: roster.length === 0 ? shaped.warnings : [...warnings, ...shaped.warnings],
     }
   })
@@ -75,6 +80,14 @@ function findRosterMismatch(rosterRows, rows) {
   return null
 }
 
+// The playedAt of a logged match with exactly this draft's 15 scores, or
+// null. Only checked once every row has valid points, so a half-fixed draft
+// can't match early.
+function findDuplicateOf(rows, matchKeys) {
+  if (findBadPoints(rows)) return null
+  return matchKeys.get(matchKey(rows.map((row) => ({ rosterId: row.rosterId, points: Number(row.points) })))) ?? null
+}
+
 // One modal for both entry paths. With a roster, rows are the 15 roster
 // slots and only points are editable. Without one (auto-fill setup), rows
 // are free name/distance/points and match 1 becomes the roster on save.
@@ -96,10 +109,24 @@ function MatchEntryModal({ request, roster: rosterAtOpen, onClose }) {
   const [playedAt, setPlayedAt] = useState(() => toLocalDatetimeValue(new Date()))
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [matchKeys, setMatchKeys] = useState(() => new Map())
 
   useEffect(() => {
     dialogRef.current.showModal()
   }, [])
+
+  // Setup mode has no logged matches to compare against.
+  useEffect(() => {
+    if (isSetup) return
+    let ignore = false
+    getMatchKeys().then(
+      (keys) => !ignore && setMatchKeys(keys),
+      (failure) => !ignore && setError(`Couldn't check for duplicate matches: ${failure.message}`)
+    )
+    return () => {
+      ignore = true
+    }
+  }, [isSetup])
 
   useEffect(() => {
     if (!request.pending) return
@@ -133,6 +160,17 @@ function MatchEntryModal({ request, roster: rosterAtOpen, onClose }) {
     )
   }
 
+  const setKeepDuplicate = (keepDuplicate) => {
+    setDrafts((prev) => prev.map((draft, i) => (i === page ? { ...draft, keepDuplicate } : draft)))
+  }
+
+  // A duplicate is skipped unless the user opts to keep it. Skipping only
+  // applies while the draft still duplicates a logged match, so editing a
+  // score away from the duplicate puts it back in the save.
+  const duplicateOf = drafts.map((draft) => (isSetup ? null : findDuplicateOf(draft.rows, matchKeys)))
+  const isSkipped = (matchIndex) => duplicateOf[matchIndex] !== null && !drafts[matchIndex].keepDuplicate
+  const saveCount = drafts.filter((_, i) => !isSkipped(i)).length
+
   const handleSave = async () => {
     setError('')
     const fail = (matchIndex, message) => {
@@ -146,18 +184,23 @@ function MatchEntryModal({ request, roster: rosterAtOpen, onClose }) {
     }
     const playedAtIso = new Date(playedAt).toISOString()
 
-    const filled = drafts.map((draft) =>
-      isSetup ? draft.rows.filter((row) => row.umaName.trim() !== '') : draft.rows
-    )
+    const toSave = drafts
+      .map((draft, matchIndex) => ({
+        matchIndex,
+        source: draft.source,
+        rows: isSetup ? draft.rows.filter((row) => row.umaName.trim() !== '') : draft.rows,
+      }))
+      .filter(({ matchIndex }) => !isSkipped(matchIndex))
 
+    // Nothing is ever skipped in setup mode, so toSave[0] is Match 1 there.
     let rosterRows = []
     if (isSetup) {
-      rosterRows = filled[0].map(({ umaName, distance }) => ({ umaName: umaName.trim(), distance }))
+      rosterRows = toSave[0].rows.map(({ umaName, distance }) => ({ umaName: umaName.trim(), distance }))
       const rosterErrors = validateRoster(rosterRows)
       if (rosterErrors.length > 0) return fail(0, rosterErrors[0])
     }
 
-    for (const [matchIndex, rows] of filled.entries()) {
+    for (const { matchIndex, rows } of toSave) {
       if (isSetup && matchIndex > 0) {
         const mismatch = findRosterMismatch(rosterRows, rows)
         if (mismatch) return fail(matchIndex, mismatch)
@@ -172,16 +215,16 @@ function MatchEntryModal({ request, roster: rosterAtOpen, onClose }) {
         await createRosterWithMatches({
           playedAt: playedAtIso,
           roster: rosterRows,
-          matches: filled.map((rows, i) => ({
-            source: drafts[i].source,
+          matches: toSave.map(({ source, rows }) => ({
+            source,
             rows: rows.map((row) => ({ umaName: row.umaName, points: Number(row.points) })),
           })),
         })
       } else {
         await addMatches({
           playedAt: playedAtIso,
-          matches: filled.map((rows, i) => ({
-            source: drafts[i].source,
+          matches: toSave.map(({ source, rows }) => ({
+            source,
             entries: rows.map((row) => ({ rosterId: row.rosterId, points: Number(row.points) })),
           })),
         })
@@ -245,6 +288,23 @@ function MatchEntryModal({ request, roster: rosterAtOpen, onClose }) {
                 Batches assume every match has the identical 15-uma roster, including each uma's distance. If
                 your roster changed partway through, upload separate batches instead.
               </p>
+            )}
+
+            {duplicateOf[page] !== null && (
+              <div className="warnings duplicate-warning" role="alert">
+                <p>
+                  This match has exactly the same scores as the match logged on {formatPlayedAt(duplicateOf[page])} —
+                  it may be a repeat of screenshots you already uploaded.
+                </p>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!draft.keepDuplicate}
+                    onChange={(event) => setKeepDuplicate(!event.target.checked)}
+                  />
+                  Don't save this match
+                </label>
+              </div>
             )}
 
             {warnings.length > 0 && (
@@ -334,8 +394,12 @@ function MatchEntryModal({ request, roster: rosterAtOpen, onClose }) {
               </button>
             )}
             {isLastPage ? (
-              <button type="button" className="btn btn-primary" disabled={saving} onClick={handleSave}>
-                {drafts.length > 1 ? `Save ${drafts.length} matches` : 'Save match'}
+              <button type="button" className="btn btn-primary" disabled={saving || saveCount === 0} onClick={handleSave}>
+                {saveCount === 0
+                  ? 'Nothing to save'
+                  : drafts.length === 1
+                    ? 'Save match'
+                    : `Save ${saveCount} ${saveCount === 1 ? 'match' : 'matches'}`}
               </button>
             ) : (
               <button type="button" className="btn btn-primary" onClick={() => setPage(page + 1)}>

@@ -475,8 +475,13 @@ export function applyBatchRosterFallback(matches) {
   const insertedRows = rows.map(() => [])
 
   rows.forEach((matchRows, matchIndex) => {
+    // A closest-match correction counts as resolved once another match in
+    // the batch read that same name exactly - otherwise the uma would look
+    // missing here and get a second, blank row.
     const resolvedNames = new Set(
-      matchRows.filter((row) => !row.correctedFrom).map((row) => normalizeName(row.umaName))
+      matchRows
+        .filter((row) => !row.correctedFrom || knownNames.has(normalizeName(row.umaName)))
+        .map((row) => normalizeName(row.umaName))
     )
     const missing = [...knownNames].filter((name) => !resolvedNames.has(name))
     const uncertain = matchRows.filter(

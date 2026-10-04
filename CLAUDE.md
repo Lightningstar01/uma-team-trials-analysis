@@ -75,7 +75,7 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
     │   ├── constants.js             # Distance category enum, ROSTER_SIZE
     │   ├── roster.js                # Stored 15-slot roster: get/create/validate, edit a slot (only once its scores are deleted), reset everything
     │   ├── roster.test.js           # Unit tests against fake-indexeddb for roster.js
-    │   ├── matches.js               # Matches: add (optionally creating the roster), per-slot stats, weakest link, match history, delete match, delete one uma's scores
+    │   ├── matches.js               # Matches: add (optionally creating the roster), per-slot stats, weakest link, match history, duplicate-match keys, delete match, delete one uma's scores
     │   └── matches.test.js          # Unit tests against fake-indexeddb for matches.js
     ├── ocr/
     │   ├── imageValidation.js       # Light upload validation (file type, size cap)
@@ -89,16 +89,16 @@ The docs layout is settled. The `src/` layout comes from the Vite project the de
     │   ├── umaNames.test.js         # Unit tests for exact lookup and closest-match correction
     │   ├── readScoreInfoBatch.js    # Upload pipeline: validate files, pair by upload order, OCR + merge each match, batch roster fallback
     │   ├── readScoreInfoBatch.test.js  # Unit tests against a mocked tesseractClient
-    │   ├── matchToRoster.js         # Lines up one match's OCR rows with the stored roster by name (mapOcrRowsToRoster)
+    │   ├── matchToRoster.js         # Lines up one match's OCR rows with the stored roster by name, fixing a single misread by elimination (mapOcrRowsToRoster)
     │   ├── matchToRoster.test.js    # Unit tests for the roster mapping and its warnings
     │   └── __fixtures__/            # Real Score Info screenshots for OCR dev/testing, plus sampleMatch.js (15-row reference data)
     ├── components/
     │   ├── RosterSetup.jsx          # First-run screen: fill the roster manually, or auto-fill it from the first screenshot batch
     │   ├── RosterDashboard.jsx      # Roster table: sortable avg/high/low/matches per uma, expandable score list, weakest link, delete scores, edit an empty slot, reset roster
-    │   ├── rosterSort.js            # Pure column-sort helpers for the roster table (sortRosterStats, nextSort)
+    │   ├── rosterSort.js            # Pure sort helpers: roster table columns (sortRosterStats, nextSort), entry-grid rows by points (sortEntryRowsByPoints)
     │   ├── rosterSort.test.js       # Unit tests for the sort helpers (pure logic, not a React component test)
     │   ├── MatchHistory.jsx         # Collapsible list of logged matches with delete-match (undo)
-    │   ├── MatchEntryModal.jsx      # <dialog> for logging matches (manual or screenshots), one page per match; points-only rows once a roster exists
+    │   ├── MatchEntryModal.jsx      # <dialog> for logging matches (manual or screenshots), one page per match; points-only rows once a roster exists; warns (with an exclude option) when a match duplicates a logged one
     │   └── format.js                # Shared number/date display helpers
     ├── App.jsx
     └── main.jsx

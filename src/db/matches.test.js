@@ -6,7 +6,9 @@ import {
   deleteUmaScores,
   findWeakestLink,
   getMatchHistory,
+  getMatchKeys,
   getRosterStats,
+  matchKey,
 } from './matches.js'
 import { createRoster } from './roster.js'
 import { db } from './db.js'
@@ -153,6 +155,55 @@ describe('getMatchHistory', () => {
       matches: [{ entries: [{ rosterId: a, points: 1 }] }, { entries: [{ rosterId: a, points: 2 }] }],
     })
     expect((await getMatchHistory()).map((m) => m.matchId)).toEqual([second, first])
+  })
+})
+
+describe('matchKey', () => {
+  it('ignores entry order', () => {
+    const a = [{ rosterId: 1, points: 100 }, { rosterId: 2, points: 200 }]
+    expect(matchKey(a)).toBe(matchKey([...a].reverse()))
+  })
+
+  it('differs when any slot has different points', () => {
+    expect(matchKey([{ rosterId: 1, points: 100 }, { rosterId: 2, points: 200 }])).not.toBe(
+      matchKey([{ rosterId: 1, points: 100 }, { rosterId: 2, points: 201 }])
+    )
+  })
+
+  it('differs when the same points belong to different slots', () => {
+    expect(matchKey([{ rosterId: 1, points: 100 }, { rosterId: 2, points: 200 }])).not.toBe(
+      matchKey([{ rosterId: 1, points: 200 }, { rosterId: 2, points: 100 }])
+    )
+  })
+})
+
+describe('getMatchKeys', () => {
+  it("maps each logged match's key to its playedAt", async () => {
+    const [a, b] = await createRoster(makeRosterRows())
+    const first = [{ rosterId: a, points: 100 }, { rosterId: b, points: 200 }]
+    const second = [{ rosterId: a, points: 300 }, { rosterId: b, points: 400 }]
+    await addMatches({ playedAt: '2026-01-01T00:00:00.000Z', matches: [{ entries: first }] })
+    await addMatches({ playedAt: '2026-01-02T00:00:00.000Z', matches: [{ entries: second }] })
+
+    expect(await getMatchKeys()).toEqual(
+      new Map([
+        [matchKey(first), '2026-01-01T00:00:00.000Z'],
+        [matchKey(second), '2026-01-02T00:00:00.000Z'],
+      ])
+    )
+  })
+
+  it('does not treat a match with some scores deleted as identical to the full match', async () => {
+    const [a, b] = await createRoster(makeRosterRows())
+    const full = [{ rosterId: a, points: 100 }, { rosterId: b, points: 200 }]
+    await addMatches({ playedAt: '2026-01-01T00:00:00.000Z', matches: [{ entries: full }] })
+    await deleteUmaScores(b)
+
+    expect((await getMatchKeys()).has(matchKey(full))).toBe(false)
+  })
+
+  it('returns an empty map when nothing is logged', async () => {
+    expect(await getMatchKeys()).toEqual(new Map())
   })
 })
 

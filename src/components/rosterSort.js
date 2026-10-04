@@ -25,6 +25,19 @@ export function sortRosterStats(stats, { key, direction }) {
   })
 }
 
+// Orders a match's entry-grid rows by points, highest first, to line up with
+// the Score Info screenshots. Points are grid strings; blank or non-numeric
+// ones go last. Ties keep their incoming (roster) order.
+export function sortEntryRowsByPoints(rows) {
+  const valueOf = (row) => (row.points === '' || !Number.isFinite(Number(row.points)) ? null : Number(row.points))
+  return [...rows].sort((a, b) => {
+    const valueA = valueOf(a)
+    const valueB = valueOf(b)
+    if (valueA === null || valueB === null) return (valueA === null) - (valueB === null)
+    return valueB - valueA
+  })
+}
+
 // Clicking the active column flips its direction; clicking a new column
 // starts it ascending.
 export function nextSort(current, key) {

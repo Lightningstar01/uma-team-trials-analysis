@@ -116,6 +116,38 @@ export async function getMatchHistory() {
     .sort(newestFirst)
 }
 
+// A match's identity for duplicate detection: its slot/points pairs, in any
+// order. The date isn't part of it, since a batch's date is typed in by hand.
+export function matchKey(entries) {
+  return entries
+    .map(({ rosterId, points }) => `${rosterId}:${points}`)
+    .sort()
+    .join(',')
+}
+
+// Every logged match's matchKey, mapped to that match's playedAt, so a new
+// match can be checked against history before saving.
+export async function getMatchKeys() {
+  const [matches, entries] = await Promise.all([
+    db.matches.toArray(),
+    db.matchEntries.toArray(),
+  ])
+
+  const entriesByMatch = new Map()
+  for (const entry of entries) {
+    const matchEntries = entriesByMatch.get(entry.matchId) ?? []
+    matchEntries.push(entry)
+    entriesByMatch.set(entry.matchId, matchEntries)
+  }
+
+  const keys = new Map()
+  for (const match of matches) {
+    const key = matchKey(entriesByMatch.get(match.id) ?? [])
+    if (!keys.has(key)) keys.set(key, match.playedAt)
+  }
+  return keys
+}
+
 export async function deleteMatch(matchId) {
   return db.transaction('rw', db.matches, db.matchEntries, async () => {
     await db.matchEntries.where('matchId').equals(matchId).delete()
